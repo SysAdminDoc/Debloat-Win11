@@ -1,3 +1,5 @@
+<p align="center"><img src="icon.svg" width="128" height="128" alt="Debloat-Win11"></p>
+
 # Windows 11 Complete Debloat Script
 
 **Version:** v1.1.0
