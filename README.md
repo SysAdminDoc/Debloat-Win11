@@ -1,10 +1,10 @@
 # Windows 11 Complete Debloat Script
 
-**Version:** 2.0  
+**Version:** v1.1.0
 **Author:** SysAdminDoc
-**Last Updated:** January 2025  
-**Lines of Code:** 2,469  
-**Compatibility:** Windows 10 (1903+) / Windows 11
+**Last Updated:** March 2026
+**Lines of Code:** ~2,800
+**Compatibility:** Windows 10 (1903+) / Windows 11 (including 24H2/25H2)
 
 ---
 
@@ -22,7 +22,9 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 | OEM PCs have manufacturer bloat | Nuclear cleanup of Dell, HP, Lenovo, ASUS, Acer, MSI, Razer |
 | Telemetry and ads everywhere | Comprehensive privacy hardening |
 | Generic power settings | Hardware-aware optimization (laptop vs desktop, SSD vs HDD) |
-| No audit trail | Full logging to `C:\Maven\Logs` |
+| No audit trail | Full logging with configurable path |
+| No way to preview changes | DryRun mode scans without modifying |
+| No undo capability | JSON undo manifest records every change |
 | Risk of breaking production PCs | Extensive safety testing, preserve in-use apps |
 
 ---
@@ -51,6 +53,14 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v1.1.0
+- ✅ Configurable log path (`-LogDir`)
+- ✅ DryRun mode (`-DryRun`) - scan and report without changes
+- ✅ End-of-run summary report (counts, disk space, runtime)
+- ✅ JSON undo manifest for change tracking/reversal
+- ✅ Windows 11 24H2/25H2 bloat (Recall, Copilot, Spotlight, Suggested Actions, Teams, Phone Link)
+- ✅ `-SkipOfficeRemoval`, `-SkipOneDriveRemoval`, `-KeepDefender` switches
 
 ### Detection & Safety
 - ✅ Windows version verification
@@ -145,6 +155,24 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 # Run PowerShell as Administrator
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\Debloat-Win11.ps1
+```
+
+### Parameters
+```powershell
+# Custom log directory
+.\Debloat-Win11.ps1 -LogDir "C:\Logs"
+
+# Dry run - scan and report without making changes
+.\Debloat-Win11.ps1 -DryRun
+
+# Skip Office and OneDrive removal
+.\Debloat-Win11.ps1 -SkipOfficeRemoval -SkipOneDriveRemoval
+
+# Keep Windows Defender untouched
+.\Debloat-Win11.ps1 -KeepDefender
+
+# Combine flags
+.\Debloat-Win11.ps1 -DryRun -LogDir "D:\Logs" -SkipOfficeRemoval
 ```
 
 ### Option 2: One-Liner
@@ -324,7 +352,9 @@ Low Battery:      Warning at 10%
 | **Hardware Detection** | Applies appropriate settings for device type |
 | **Service Whitelist** | Critical services are never touched |
 | **App Whitelist** | Useful apps are preserved |
-| **Logging** | Full audit trail in C:\Maven\Logs |
+| **Logging** | Full audit trail with configurable log path |
+| **Undo Manifest** | JSON file recording every change for reversal |
+| **DryRun Mode** | Preview all changes without applying them |
 | **Exit Codes** | Deployment tools can verify success |
 
 ### Services Explicitly NOT Disabled
@@ -810,8 +840,11 @@ SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize
 
 ### Log Location
 ```
-C:\Maven\Logs\Debloat-YYYY-MM-DD-HHmmss.log
+<LogDir>\Debloat-YYYY-MM-DD-HHmmss.log
+<LogDir>\Debloat-Undo-YYYY-MM-DD-HHmmss.json
 ```
+
+Default `LogDir`: `%ProgramData%\Debloat-Win11\Logs` (configurable via `-LogDir`)
 
 ### Log Format
 ```
@@ -831,7 +864,7 @@ C:\Maven\Logs\Debloat-YYYY-MM-DD-HHmmss.log
 ### Sample Log Output
 ```
 [2025-01-31 10:30:45] [INFO] === WINDOWS DEBLOAT STARTING ===
-[2025-01-31 10:30:45] [INFO] Log file: C:\Maven\Logs\Debloat-2025-01-31-103045.log
+[2025-01-31 10:30:45] [INFO] Log file: C:\ProgramData\Debloat-Win11\Logs\Debloat-2025-01-31-103045.log
 [2025-01-31 10:30:46] [INFO] [Pre-Check] Windows version: Windows 11 Pro (Build 22631)
 [2025-01-31 10:30:46] [INFO] [Pre-Check] Workgroup PC (not domain-joined)
 [2025-01-31 10:30:47] [INFO] [Pre-Flight] Running system checks...
@@ -909,7 +942,7 @@ switch ($result.ExitCode) {
 
 1. Create Win32 app package (use IntuneWinAppUtil)
 2. Install command: `powershell.exe -ExecutionPolicy Bypass -File "Debloat-Win11.ps1"`
-3. Detection rule: File exists `C:\Maven\Logs\Debloat-*.log`
+3. Detection rule: File exists `%ProgramData%\Debloat-Win11\Logs\Debloat-*.log`
 4. Requirements: Windows 10 1903+
 
 ### SCCM/ConfigMgr
@@ -1153,6 +1186,26 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 
 ## Changelog
 
+### Version 1.1.0 (March 2026)
+
+**New Features:**
+- Configurable log path via `-LogDir` parameter (default: `%ProgramData%\Debloat-Win11\Logs`)
+- DryRun mode (`-DryRun`) - scans and reports without making any changes
+- End-of-run summary report with counts (AppX removed, services disabled, tasks disabled, registry tweaks, disk space recovered, runtime)
+- JSON undo manifest recording every change with old/new values for reversal
+- `-SkipOfficeRemoval`, `-SkipOneDriveRemoval`, `-KeepDefender` parameter switches
+
+**Windows 11 24H2/25H2 Coverage:**
+- Disable Windows Recall (AI snapshots)
+- Disable Copilot (registry + AppX + Edge policy)
+- Disable Spotlight desktop suggestions
+- Disable Suggested Actions
+- Disable Windows Backup nag
+- Remove new Teams (MSIX)
+- Disable Phone Link auto-start
+
+**Total Lines:** ~2,800
+
 ### Version 2.0 (January 2025)
 
 **New Features:**
@@ -1183,7 +1236,7 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 - Removed IPv6 disable (can break networks)
 - Hardware-aware hibernation setting
 
-**Total Lines:** 2,469
+**Lines:** 2,469
 
 ### Version 1.0 (Initial Release)
 - Basic debloat functionality
@@ -1207,4 +1260,4 @@ This script is provided as-is for use by Maven Imaging and authorized partners. 
 
 ---
 
-*Documentation last updated: January 31, 2025*
+*Documentation last updated: March 18, 2026*
