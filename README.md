@@ -2,6 +2,8 @@
 
 # Windows 11 Complete Debloat Script
 
+![Version](https://img.shields.io/badge/version-v1.1.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+
 **Version:** v1.1.0
 **Author:** SysAdminDoc
 **Last Updated:** March 2026
