@@ -20,7 +20,10 @@ param(
     [switch]$Silent,
     [switch]$Explain,
     [string]$RestoreApp,
-    [string[]]$DiffManifests
+    [string[]]$DiffManifests,
+    [string]$WimPath,
+    [int]$WimIndex = 1,
+    [string]$MountDir = "C:\Debloat-WIM-Mount"
 )
 
 # ============================================================================
@@ -236,6 +239,120 @@ if ($DiffManifests) {
 
     Write-Host ""
     Write-Host "=== DIFF COMPLETE ===" -ForegroundColor Yellow
+    exit 0
+}
+
+# ============================================================================
+# WIM IMAGE MODE - Offline debloat of a mounted Windows image
+# ============================================================================
+if ($WimPath) {
+    if (!(Test-Path $WimPath)) {
+        Write-Host "ERROR: WIM file not found: $WimPath" -ForegroundColor Red
+        exit 2
+    }
+
+    Write-Host "=== WIM IMAGE MODE ===" -ForegroundColor Yellow
+    Write-Host "  Image: $WimPath (Index $WimIndex)" -ForegroundColor Cyan
+    Write-Host "  Mount: $MountDir" -ForegroundColor Cyan
+
+    if (!(Test-Path $MountDir)) { New-Item -Path $MountDir -ItemType Directory -Force | Out-Null }
+
+    Write-Host "`n  Mounting image..." -ForegroundColor Gray
+    $mountResult = Mount-WindowsImage -ImagePath $WimPath -Index $WimIndex -Path $MountDir -EA 0
+    if (-not $mountResult) {
+        Write-Host "ERROR: Failed to mount WIM image" -ForegroundColor Red
+        exit 2
+    }
+    Write-Host "  Mounted successfully" -ForegroundColor Green
+
+    # Remove provisioned AppX packages from the offline image
+    Write-Host "`n  Removing provisioned AppX packages..." -ForegroundColor Gray
+    $provPkgs = Get-AppxProvisionedPackage -Path $MountDir -EA 0
+    $removePatterns = @(
+        '*Clipchamp*', '*Microsoft.BingNews*', '*Microsoft.BingSports*', '*Microsoft.BingWeather*',
+        '*Microsoft.BingSearch*', '*Microsoft.Copilot*', '*Microsoft.GamingApp*', '*Microsoft.GetHelp*',
+        '*Microsoft.Getstarted*', '*Microsoft.MicrosoftSolitaireCollection*', '*Microsoft.People*',
+        '*Microsoft.WindowsFeedbackHub*', '*Microsoft.ZuneMusic*', '*Microsoft.ZuneVideo*',
+        '*Microsoft.Xbox*', '*Microsoft.YourPhone*', '*Microsoft.WindowsMaps*', '*Microsoft.Todos*',
+        '*Microsoft.OutlookForWindows*', '*Microsoft.PCManager*', '*Microsoft.Windows.AIHub*',
+        '*Microsoft.M365Companions*', '*Microsoft.WidgetsPlatformRuntime*',
+        '*MicrosoftWindows.Client.WebExperience*', '*MicrosoftWindows.CrossDevice*',
+        '*Disney*', '*Spotify*', '*Facebook*', '*TikTok*', '*Netflix*', '*Amazon*',
+        '*CandyCrush*', '*BubbleWitch*'
+    )
+    $removed = 0
+    foreach ($pkg in $provPkgs) {
+        foreach ($pattern in $removePatterns) {
+            if ($pkg.DisplayName -like $pattern -or $pkg.PackageName -like $pattern) {
+                Remove-AppxProvisionedPackage -Path $MountDir -PackageName $pkg.PackageName -EA 0 | Out-Null
+                Write-Host "    Removed: $($pkg.DisplayName)" -ForegroundColor DarkGray
+                $removed++
+                break
+            }
+        }
+    }
+    Write-Host "  Removed $removed provisioned packages" -ForegroundColor Green
+
+    # Apply registry tweaks to the offline Default user hive
+    Write-Host "`n  Applying offline registry tweaks..." -ForegroundColor Gray
+    $offlineHive = "$MountDir\Users\Default\NTUSER.DAT"
+    if (Test-Path $offlineHive) {
+        $hiveName = "HKU\OfflineWIM"
+        reg load $hiveName $offlineHive 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SilentInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v ContentDeliveryAllowed /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v OemPreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v PreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v FeatureManagementEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Hidden /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAl /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            [gc]::Collect()
+            Start-Sleep -Milliseconds 500
+            reg unload $hiveName 2>$null
+            Write-Host "  Default user hive configured" -ForegroundColor Green
+        }
+    }
+
+    # Apply HKLM tweaks to the offline SOFTWARE hive
+    $offlineSW = "$MountDir\Windows\System32\config\SOFTWARE"
+    if (Test-Path $offlineSW) {
+        $swHive = "HKU\OfflineSW"
+        reg load $swHive $offlineSW 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            reg add "$swHive\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v DisableAIDataAnalysis /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v AllowRecallEnablement /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            [gc]::Collect()
+            Start-Sleep -Milliseconds 500
+            reg unload $swHive 2>$null
+            Write-Host "  System policies configured" -ForegroundColor Green
+        }
+    }
+
+    # Unmount and commit
+    Write-Host "`n  Unmounting and saving image..." -ForegroundColor Gray
+    Dismount-WindowsImage -Path $MountDir -Save -EA 0 | Out-Null
+    Write-Host "  Image saved successfully" -ForegroundColor Green
+
+    Write-Host ""
+    Write-Host "=== WIM DEBLOAT COMPLETE ===" -ForegroundColor Green
+    Write-Host "  Removed: $removed AppX packages" -ForegroundColor White
+    Write-Host "  Applied: privacy, telemetry, UI, OOBE, and AI policy tweaks" -ForegroundColor White
+    Write-Host "  Image ready for deployment via DISM, MDT, or WDS" -ForegroundColor Cyan
     exit 0
 }
 
