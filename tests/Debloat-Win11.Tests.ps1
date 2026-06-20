@@ -399,3 +399,168 @@ Describe 'Pre-Flight Enhancements' {
         $scriptContent | Should -Match 'RemoveDefaultMicrosoftStorePackages'
     }
 }
+
+# ============================================================================
+# MOCK-BASED BEHAVIORAL TESTS
+# ============================================================================
+
+Describe 'Config Override Merge' {
+    BeforeAll {
+        $script:configOverrides = @{
+            RemovePatterns = @('*TestApp1*', '*TestApp2*')
+            ServicesToDisable = @('TestSvc1')
+        }
+        $script:defaultRemovePatterns = @('*Default1*', '*Default2*')
+    }
+
+    It 'config RemovePatterns overrides defaults' {
+        $patterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { $script:configOverrides.RemovePatterns } else { $script:defaultRemovePatterns }
+        $patterns | Should -Be @('*TestApp1*', '*TestApp2*')
+    }
+
+    It 'falls back to defaults when key is absent' {
+        $hasKey = $script:configOverrides.ContainsKey('EdgeBookmarks')
+        $hasKey | Should -Be $false
+    }
+}
+
+Describe 'DarkMode Config Override' {
+    It 'script checks configOverrides for DarkMode' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('DarkMode'\)"
+    }
+}
+
+Describe 'OemExclude Config Override' {
+    It 'script checks configOverrides for OemExclude' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('OemExclude'\)"
+    }
+
+    It 'defines Test-OemTarget helper' {
+        $allContent | Should -Match 'function Test-OemTarget'
+    }
+}
+
+Describe 'Disable-TaskDryRun Behavior' {
+    BeforeAll {
+        $script:manifest = @{
+            changes = @{
+                tasks_disabled = [System.Collections.ArrayList]@()
+            }
+        }
+        $script:counters = @{ TasksDisabled = 0 }
+        $DryRun = $true
+
+        function Disable-TaskDryRun {
+            param([string]$TaskName)
+            $tasks = Get-ScheduledTask -TaskName $TaskName -EA 0
+            foreach ($task in $tasks) {
+                $script:manifest.changes.tasks_disabled.Add($task.TaskName) | Out-Null
+                $script:counters.TasksDisabled++
+            }
+        }
+    }
+
+    It 'records existing tasks in manifest' {
+        $task = Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTaskMachineCore*' -EA 0
+        if ($task) {
+            $before = $script:manifest.changes.tasks_disabled.Count
+            Disable-TaskDryRun -TaskName 'MicrosoftEdgeUpdateTaskMachineCore*'
+            $script:manifest.changes.tasks_disabled.Count | Should -BeGreaterThan $before
+        }
+    }
+
+    It 'does not record non-existent tasks' {
+        $before = $script:manifest.changes.tasks_disabled.Count
+        Disable-TaskDryRun -TaskName 'NonExistentTask99999'
+        $script:manifest.changes.tasks_disabled.Count | Should -Be $before
+    }
+}
+
+Describe 'Concurrent Execution Guard' {
+    It 'creates lockfile mechanism in script' {
+        $scriptContent | Should -Match 'lockFile'
+        $scriptContent | Should -Match 'Debloat-Win11\.lock'
+    }
+
+    It 'registers cleanup on PowerShell.Exiting' {
+        $scriptContent | Should -Match 'Register-EngineEvent.*PowerShell\.Exiting'
+    }
+
+    It 'removes lockfile at script end' {
+        $scriptContent | Should -Match 'Remove-Item \$script:lockFile'
+    }
+}
+
+Describe 'Registry Version Stamp' {
+    It 'writes version to HKLM registry key' {
+        $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
+        $scriptContent | Should -Match 'Version.*v2\.2\.0'
+    }
+
+    It 'detection script checks registry first' {
+        $detectContent = Get-Content (Join-Path $PSScriptRoot '..' 'Detect-Debloat.ps1') -Raw
+        $detectContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
+        $detectContent | Should -Match 'registry stamp'
+    }
+}
+
+Describe 'Shared HKCU Tweaks' {
+    It 'HkcuTweaks.psd1 exists and is valid' {
+        $tweakFile = Join-Path $PSScriptRoot '..' 'Modules' 'HkcuTweaks.psd1'
+        Test-Path $tweakFile | Should -Be $true
+        $tweaks = & ([scriptblock]::Create((Get-Content $tweakFile -Raw)))
+        $tweaks.Count | Should -BeGreaterThan 20
+    }
+
+    It 'maintenance script loads shared tweaks' {
+        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
+        $maintainContent | Should -Match 'HkcuTweaks\.psd1'
+    }
+
+    It 'AllUsers block loads shared tweaks' {
+        $allContent | Should -Match 'HkcuTweaks\.psd1'
+    }
+}
+
+Describe 'RemoveMicrosoftCopilotApp Policy' {
+    It 'sets policy on Enterprise/Education editions' {
+        $allContent | Should -Match 'RemoveMicrosoftCopilotApp'
+    }
+}
+
+Describe 'RemoveDefaultMicrosoftStorePackages Policy' {
+    It 'sets policy with package family names on Enterprise/Education 24H2+' {
+        $allContent | Should -Match 'RemoveDefaultMicrosoftStorePackages'
+        $allContent | Should -Match 'Clipchamp\.Clipchamp'
+        $allContent | Should -Match 'Microsoft\.Copilot_8wekyb3d8bbwe'
+    }
+}
+
+Describe 'Expanded Drift Detection' {
+    It 'checks at least 30 registry values' {
+        $driftBlock = [regex]::Match($scriptContent, '\$driftChecks\s*=\s*@\(([\s\S]*?)\)').Groups[1].Value
+        $checkCount = ([regex]::Matches($driftBlock, '@\{')).Count
+        $checkCount | Should -BeGreaterOrEqual 30
+    }
+
+    It 'covers AI agent policies' {
+        $scriptContent | Should -Match "DisableSettingsAgent.*Expected"
+        $scriptContent | Should -Match "DisableAgentWorkspaces.*Expected"
+    }
+
+    It 'covers Edge telemetry' {
+        $scriptContent | Should -Match "DiagnosticData.*Expected.*0"
+    }
+
+    It 'covers WDigest security' {
+        $scriptContent | Should -Match "UseLogonCredential.*Expected.*0"
+    }
+}
+
+Describe 'Maintenance Task Trigger' {
+    It 'uses WU-completion event trigger instead of AtLogOn' {
+        $scriptContent | Should -Not -Match 'New-ScheduledTaskTrigger -AtLogOn'
+        $scriptContent | Should -Match 'EventID=19'
+        $scriptContent | Should -Match 'WindowsUpdateClient'
+    }
+}

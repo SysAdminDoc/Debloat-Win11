@@ -35,3 +35,14 @@ jobs:
             throw "$($result.FailedCount) Pester tests failed"
           }
           Write-Host "Pester: $($result.PassedCount) tests passed"
+
+      - name: DryRun Smoke Test
+        shell: pwsh
+        run: |
+          # Verify parameter binding and module dot-sourcing work without errors
+          # CheckDrift mode is the lightest path that exercises param binding and exits cleanly
+          $proc = Start-Process pwsh -ArgumentList '-ExecutionPolicy','Bypass','-NonInteractive','-File','Debloat-Win11.ps1','-CheckDrift' -Wait -PassThru -WindowStyle Hidden
+          if ($proc.ExitCode -ne 0) {
+            throw "DryRun smoke test failed with exit code $($proc.ExitCode)"
+          }
+          Write-Host "DryRun smoke test: passed (exit code 0)"
