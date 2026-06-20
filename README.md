@@ -2,12 +2,12 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v1.1.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.0.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v1.1.0
+**Version:** v2.0.0
 **Author:** SysAdminDoc
-**Last Updated:** March 2026
-**Lines of Code:** ~2,800
+**Last Updated:** June 2026
+**Lines of Code:** ~3,100
 **Compatibility:** Windows 10 (1903+) / Windows 11 (including 24H2/25H2)
 
 ---
@@ -58,7 +58,16 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 
 ## Features at a Glance
 
-### New in v1.1.0
+### New in v2.0.0
+- ✅ Real `-UndoFile` mode replays a manifest to reverse a prior run
+- ✅ Per-phase `-Only` / `-Skip` flags for surgical runs
+- ✅ Config file support (`-ConfigPath .\debloat.psd1`)
+- ✅ Progress bar in interactive mode; `-Silent` suppresses console output
+- ✅ Smart Office detection (ClickToRun, standalone, running processes)
+- ✅ Parallel service disable on PowerShell 7+
+- ✅ 26H1+ AI controls (Click to Do, Settings Agent, Agent Workspaces)
+
+### v1.1.0
 - ✅ Configurable log path (`-LogDir`)
 - ✅ DryRun mode (`-DryRun`) - scan and report without changes
 - ✅ End-of-run summary report (counts, disk space, runtime)
@@ -1190,6 +1199,27 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 
 ## Changelog
 
+### Version 2.0.0 (June 2026)
+
+**New Features:**
+- Real `-UndoFile` mode replays a manifest to reverse a prior run
+- Per-phase `-Only` / `-Skip` flags for surgical runs
+- Config file support (`-ConfigPath .\debloat.psd1`) for externalizing arrays
+- Progress bar in interactive mode; `-Silent` suppresses console output
+- Smart Office detection (ClickToRun, standalone, Visio/Project, running processes)
+- Parallel service disable via `ForEach-Object -Parallel` on PS7+ with PS5 fallback
+- 26H1+ AI controls (Click to Do, Settings Agent, Agent Workspaces, M365 Copilot blocking)
+- New AppX targets: PCManager, AIHub, M365Companions, OutlookForWindows, StartExperiencesApp
+- Tamper Protection and S Mode pre-flight detection
+- Intel chipset driver safeguard in OEM cleanup
+
+**Bug Fixes:**
+- Removed `slmgr.vbs /upk` call that incorrectly stripped Windows activation key during Office removal
+- Fixed WSAIFabricSvc comment (was mislabeled as "Windows Subsystem for Android")
+- Deduplicated ContentDeliveryManager registry writes (were applied 4x each)
+
+**Total Lines:** ~3,100
+
 ### Version 1.1.0 (March 2026)
 
 **New Features:**
@@ -1210,7 +1240,7 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 
 **Total Lines:** ~2,800
 
-### Version 2.0 (January 2025)
+### Version 1.0.0 (January 2025)
 
 **New Features:**
 - Hardware detection (laptop/desktop, SSD/HDD)
@@ -1241,12 +1271,6 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 - Hardware-aware hibernation setting
 
 **Lines:** 2,469
-
-### Version 1.0 (Initial Release)
-- Basic debloat functionality
-- AppX removal
-- Service disabling
-- Registry tweaks
 
 ---
 

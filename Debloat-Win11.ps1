@@ -1,7 +1,8 @@
 #Requires -RunAsAdministrator
+#Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v1.1.0
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.0.0
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -11,12 +12,163 @@ param(
     [switch]$DryRun,
     [switch]$SkipOfficeRemoval,
     [switch]$SkipOneDriveRemoval,
-    [switch]$KeepDefender
+    [switch]$KeepDefender,
+    [string]$UndoFile,
+    [string]$ConfigPath,
+    [string[]]$Only,
+    [string[]]$Skip,
+    [switch]$Silent,
+    [switch]$Explain
 )
+
+# ============================================================================
+# VALIDATE MUTUALLY EXCLUSIVE FLAGS
+# ============================================================================
+if ($UndoFile -and $DryRun) {
+    Write-Host "ERROR: -UndoFile and -DryRun cannot be used together" -ForegroundColor Red
+    exit 2
+}
+
+# ============================================================================
+# UNDO MODE - Replay a prior manifest to reverse changes
+# ============================================================================
+if ($UndoFile) {
+    if (!(Test-Path $UndoFile)) {
+        Write-Host "ERROR: Undo manifest not found: $UndoFile" -ForegroundColor Red
+        exit 2
+    }
+    $undoManifest = Get-Content $UndoFile -Raw | ConvertFrom-Json
+    Write-Host "=== UNDO MODE ===" -ForegroundColor Yellow
+    Write-Host "Reversing changes from: $($undoManifest.timestamp)" -ForegroundColor Cyan
+    Write-Host "Manifest version: $($undoManifest.version)" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Undo registry changes (reverse order)
+    $regChanges = @($undoManifest.changes.registry_set)
+    [array]::Reverse($regChanges)
+    $undoneReg = 0
+    foreach ($entry in $regChanges) {
+        if ($null -eq $entry.old_value) {
+            # Key did not exist before; remove it
+            if (Test-Path $entry.path) {
+                $existing = Get-ItemProperty -Path $entry.path -Name $entry.name -ErrorAction SilentlyContinue
+                if ($null -ne $existing) {
+                    Remove-ItemProperty -Path $entry.path -Name $entry.name -Force -ErrorAction SilentlyContinue
+                    $undoneReg++
+                }
+            }
+        } else {
+            # Restore old value
+            if (!(Test-Path $entry.path)) { New-Item -Path $entry.path -Force | Out-Null }
+            $type = if ($entry.type) { $entry.type } else { 'DWord' }
+            Set-ItemProperty -Path $entry.path -Name $entry.name -Value $entry.old_value -Type $type -Force -ErrorAction SilentlyContinue
+            $undoneReg++
+        }
+    }
+    Write-Host "  Registry entries restored: $undoneReg" -ForegroundColor Green
+
+    # Re-enable services
+    $undoneServices = 0
+    foreach ($svcName in $undoManifest.changes.services_disabled) {
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if ($svc) {
+            Set-Service -Name $svcName -StartupType Manual -ErrorAction SilentlyContinue
+            Start-Service -Name $svcName -ErrorAction SilentlyContinue
+            $undoneServices++
+        }
+    }
+    Write-Host "  Services re-enabled: $undoneServices" -ForegroundColor Green
+
+    # Re-enable tasks
+    $undoneTasks = 0
+    foreach ($taskName in $undoManifest.changes.tasks_disabled) {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($task) {
+            $task | Enable-ScheduledTask -ErrorAction SilentlyContinue
+            $undoneTasks++
+        }
+    }
+    Write-Host "  Scheduled tasks re-enabled: $undoneTasks" -ForegroundColor Green
+
+    # Note: AppX packages cannot be trivially re-installed; inform the user
+    $removedApps = @($undoManifest.changes.appx_removed)
+    if ($removedApps.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  NOTE: $($removedApps.Count) AppX packages were removed and cannot be auto-restored." -ForegroundColor Yellow
+        Write-Host "  Use 'winget install <package>' or the Microsoft Store to reinstall:" -ForegroundColor Yellow
+        foreach ($app in $removedApps) {
+            Write-Host "    - $app" -ForegroundColor White
+        }
+    }
+
+    Write-Host ""
+    Write-Host "=== UNDO COMPLETE ===" -ForegroundColor Green
+    Write-Host "Restart recommended to apply all restored settings." -ForegroundColor Yellow
+    exit 0
+}
+
+# ============================================================================
+# CONFIG FILE SUPPORT
+# ============================================================================
+# Merge external .psd1 config into the session, overriding built-in arrays
+$script:configOverrides = @{}
+if ($ConfigPath) {
+    if (!(Test-Path $ConfigPath)) {
+        Write-Host "ERROR: Config file not found: $ConfigPath" -ForegroundColor Red
+        exit 2
+    }
+    try {
+        $script:configOverrides = Import-PowerShellDataFile -Path $ConfigPath
+    } catch {
+        Write-Host "ERROR: Failed to parse config file: $_" -ForegroundColor Red
+        exit 2
+    }
+}
+
+# ============================================================================
+# PHASE SELECTION
+# ============================================================================
+# Valid phases for -Only / -Skip
+$script:validPhases = @('AppX','OEM','OneDrive','Office','Edge','Firewall','Privacy',
+                        'Services','SystemTweaks','Power','Network','StartMenu')
+
+if ($Only -and $Skip) {
+    Write-Host "ERROR: -Only and -Skip cannot be used together" -ForegroundColor Red
+    exit 2
+}
+
+function Test-PhaseEnabled {
+    param([string]$Phase)
+    if ($Only) { return ($Only -contains $Phase) }
+    if ($Skip) { return ($Skip -notcontains $Phase) }
+    return $true
+}
+
+# Validate phase names
+foreach ($p in ($Only + $Skip)) {
+    if ($p -and $script:validPhases -notcontains $p) {
+        Write-Host "ERROR: Unknown phase '$p'. Valid phases: $($script:validPhases -join ', ')" -ForegroundColor Red
+        exit 2
+    }
+}
 
 $ErrorActionPreference = "SilentlyContinue"
 $script:exitCode = 0
 $script:startTime = Get-Date
+
+# ============================================================================
+# PROGRESS TRACKING
+# ============================================================================
+$script:totalPhases = 12
+$script:currentPhase = 0
+function Update-Phase {
+    param([string]$PhaseName)
+    $script:currentPhase++
+    if (-not $Silent -and [Environment]::UserInteractive) {
+        $pct = [int](($script:currentPhase / $script:totalPhases) * 100)
+        Write-Progress -Activity "Debloat-Win11" -Status "$PhaseName" -PercentComplete $pct
+    }
+}
 
 # ============================================================================
 # COUNTERS & UNDO MANIFEST
@@ -34,7 +186,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v1.1.0'
+    version   = 'v2.0.0'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed      = [System.Collections.ArrayList]@()
@@ -57,6 +209,8 @@ function Write-Log {
     $prefix = if ($DryRun) { "[DRY RUN] " } else { "" }
     $logEntry = "[$timestamp] [$Level] $prefix$Message"
     Add-Content -Path $logFile -Value $logEntry -EA 0
+
+    if ($Silent) { if ($Level -eq 'ERROR') { $script:exitCode = 1 }; return }
 
     switch ($Level) {
         "INFO"    { Write-Host "$prefix$Message" -ForegroundColor Cyan }
@@ -97,10 +251,21 @@ function Set-Reg {
     Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force -EA 0
 }
 
+# Cache all packages once at start of AppX phase for performance
+$script:allAppxPackages = $null
+$script:allProvisionedPackages = $null
+
 function Remove-AppxDryRun {
     param([string]$Pattern)
-    $pkgs = Get-AppxPackage -AllUsers -Name $Pattern 2>$null
-    $provPkgs = Get-AppxProvisionedPackage -Online 2>$null | Where-Object { $_.DisplayName -like $Pattern -or $_.PackageName -like $Pattern }
+
+    # Lazy-init: query once, filter many
+    if ($null -eq $script:allAppxPackages) {
+        $script:allAppxPackages = @(Get-AppxPackage -AllUsers 2>$null)
+        $script:allProvisionedPackages = @(Get-AppxProvisionedPackage -Online 2>$null)
+    }
+
+    $pkgs = $script:allAppxPackages | Where-Object { $_.Name -like $Pattern }
+    $provPkgs = $script:allProvisionedPackages | Where-Object { $_.DisplayName -like $Pattern -or $_.PackageName -like $Pattern }
 
     foreach ($pkg in $pkgs) {
         $script:manifest.changes.appx_removed.Add($pkg.Name) | Out-Null
@@ -149,7 +314,7 @@ function Disable-TaskDryRun {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v1.1.0 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.0.0 STARTING ===" "INFO"
 if ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
 
@@ -219,6 +384,27 @@ if ($pendingReboot) {
     Write-Log "  Pending reboot detected - some changes may require additional reboot" "WARNING"
 } else {
     Write-Log "  No pending reboot" "INFO"
+}
+
+# Check for problematic states that could cause failures
+$windowsSetupRunning = Get-Process -Name 'SetupHost','SetupPrep' -EA 0
+if ($windowsSetupRunning) {
+    Write-Log "ERROR: Windows Setup is currently running (Feature Update in progress). Aborting." "ERROR"
+    exit 2
+}
+
+# Check for pending Feature Update staging
+$featureUpdatePending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler_Oobe"
+$setupInProgress = Test-Path "$env:SystemDrive\`$WINDOWS.~BT\Sources\SetupPlatform.ini"
+if ($featureUpdatePending -or $setupInProgress) {
+    Write-Log "  Feature Update is staged/pending - proceed with caution" "WARNING"
+}
+
+# Check for active MSIX staging (AppX installations in progress)
+$msixStaging = Get-Process -Name 'MicrosoftEdgeUpdate','AppInstaller' -EA 0
+if ($msixStaging) {
+    Write-Log "  MSIX/AppX staging in progress - waiting 10 seconds" "WARNING"
+    Start-Sleep -Seconds 10
 }
 
 # Check RAM
@@ -410,8 +596,6 @@ if ($SkipOfficeRemoval) {
     # Check for Office 365 / Microsoft 365 subscription (ClickToRun)
     $clickToRun = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" -EA 0
     if ($clickToRun.ProductReleaseIds) {
-        # Check if it's a licensed/subscription product
-        $licenseCheck = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Scenario\INSTALL" -EA 0
         $o365Products = @('O365ProPlusRetail', 'O365BusinessRetail', 'O365HomePremRetail', 'O365SmallBusPremRetail')
         foreach ($product in $o365Products) {
             if ($clickToRun.ProductReleaseIds -match $product) {
@@ -438,10 +622,33 @@ if ($SkipOfficeRemoval) {
     }
 
     # Check for running Office processes (indicates active use)
-    $officeProcesses = Get-Process -Name 'WINWORD','EXCEL','POWERPNT','OUTLOOK','ONENOTE' -EA 0
+    # Includes OneNote 2016, Visio, Project, Access alongside core apps
+    $officeProcesses = Get-Process -Name 'WINWORD','EXCEL','POWERPNT','OUTLOOK','ONENOTE','MSPUB','MSACCESS','VISIO','WINPROJ' -EA 0
     if ($officeProcesses) {
         $script:officeInUse = $true
-        Write-Host "  Office apps currently running" -ForegroundColor Gray
+        $runningNames = ($officeProcesses | Select-Object -ExpandProperty Name -Unique) -join ', '
+        Write-Host "  Office apps currently running: $runningNames" -ForegroundColor Gray
+    }
+
+    # Check for OneNote 2016 standalone (separate install from Office suite)
+    if (-not $script:officeInUse) {
+        $oneNote2016 = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\16.0\OneNote\InstallRoot" -EA 0
+        if ($oneNote2016.Path -and (Test-Path $oneNote2016.Path)) {
+            $script:officeInUse = $true
+            Write-Host "  OneNote 2016 standalone detected" -ForegroundColor Gray
+        }
+    }
+
+    # Check for Visio or Project standalone installations
+    if (-not $script:officeInUse) {
+        foreach ($appKey in @('Visio', 'Project')) {
+            $appInstall = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\16.0\$appKey\InstallRoot" -EA 0
+            if ($appInstall.Path -and (Test-Path $appInstall.Path)) {
+                $script:officeInUse = $true
+                Write-Host "  $appKey standalone detected" -ForegroundColor Gray
+                break
+            }
+        }
     }
 }
 
@@ -454,6 +661,8 @@ if ($script:officeInUse) {
 # ============================================================================
 # SYSTEM TWEAKS
 # ============================================================================
+Update-Phase "System Tweaks"
+if (Test-PhaseEnabled 'SystemTweaks') {
 Write-Host "`n[System Tweaks] Applying registry tweaks..." -ForegroundColor Yellow
 
 # Privacy & Telemetry
@@ -1087,7 +1296,8 @@ Write-Host "  Notifications configured" -ForegroundColor Green
 if (-not $KeepDefender) {
     Write-Host "`n[Defender] Adding folder exclusions..." -ForegroundColor Yellow
 
-    $defenderExclusions = @(
+    # Allow config file to override Defender exclusions
+    $defenderExclusions = if ($script:configOverrides.ContainsKey('DefenderExclusions')) { $script:configOverrides.DefenderExclusions } else { @(
         "C:\images",
         "C:\MTU",
         "C:\Maven",
@@ -1099,7 +1309,7 @@ if (-not $KeepDefender) {
         "C:\ProgramData\Minipacs",
         "C:\drtech",
         "C:\ecali1"
-    )
+    ) }
 
     if (-not $DryRun) {
         foreach ($path in $defenderExclusions) {
@@ -1518,13 +1728,17 @@ if (-not $DryRun) {
 }
 
 Write-Host "  Optional features configured" -ForegroundColor Green
+} else { Write-Log "[System Tweaks] SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # PHASE 1: REMOVE APPX PACKAGES (USER + PROVISIONED)
 # ============================================================================
+Update-Phase "AppX Package Removal"
+if (Test-PhaseEnabled 'AppX') {
 Write-Log "[Phase 1/7] Removing bloatware packages..." "SECTION"
 
-$removePatterns = @(
+# Allow config file to override the remove patterns
+$removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { $script:configOverrides.RemovePatterns } else { @(
     '*Clipchamp*',
     '*Microsoft.3DBuilder*',
     '*Microsoft.549981C3F5F10*',
@@ -1637,7 +1851,7 @@ $removePatterns = @(
     '*RazerInc*',
     '*RazerCortex*',
     '*RazerSynapse*'
-)
+) }
 
 foreach ($pattern in $removePatterns) {
     Remove-AppxDryRun -Pattern $pattern
@@ -1674,10 +1888,13 @@ if (-not $DryRun) {
         if (Test-Path $_) { Remove-Item $_ -Force -EA 0 }
     }
 }
+} else { Write-Log "[Phase 1/7] AppX removal SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # PHASE 2: OEM BLOATWARE CLEANUP (Dell, Intel, HP, Lenovo)
 # ============================================================================
+Update-Phase "OEM Cleanup"
+if (Test-PhaseEnabled 'OEM') {
 Write-Log "[Phase 2/7] Removing OEM bloatware..." "SECTION"
 
 if (-not $DryRun) {
@@ -1824,23 +2041,23 @@ if (-not $DryRun) {
 
     # Delete OEM folders - All user profiles
     $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
-    foreach ($profile in $userProfiles) {
+    foreach ($userProf in $userProfiles) {
         @(
-            "$($profile.FullName)\AppData\Local\Dell",
-            "$($profile.FullName)\AppData\Roaming\Dell",
-            "$($profile.FullName)\AppData\Local\DellTechHub",
-            "$($profile.FullName)\AppData\Local\Intel",
-            "$($profile.FullName)\AppData\Roaming\Intel",
-            "$($profile.FullName)\AppData\Local\HP",
-            "$($profile.FullName)\AppData\Roaming\HP",
-            "$($profile.FullName)\AppData\Local\Lenovo",
-            "$($profile.FullName)\AppData\Roaming\Lenovo"
+            "$($userProf.FullName)\AppData\Local\Dell",
+            "$($userProf.FullName)\AppData\Roaming\Dell",
+            "$($userProf.FullName)\AppData\Local\DellTechHub",
+            "$($userProf.FullName)\AppData\Local\Intel",
+            "$($userProf.FullName)\AppData\Roaming\Intel",
+            "$($userProf.FullName)\AppData\Local\HP",
+            "$($userProf.FullName)\AppData\Roaming\HP",
+            "$($userProf.FullName)\AppData\Local\Lenovo",
+            "$($userProf.FullName)\AppData\Roaming\Lenovo"
         ) | ForEach-Object {
             if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
         }
 
         # Clear Accessibility shortcuts
-        $accessibilityPath = "$($profile.FullName)\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Accessibility"
+        $accessibilityPath = "$($userProf.FullName)\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Accessibility"
         if (Test-Path $accessibilityPath) {
             Remove-Item "$accessibilityPath\*" -Recurse -Force -EA 0
         }
@@ -2002,10 +2219,10 @@ if (-not $DryRun) {
 
     # Delete OEM from all user registry hives
     $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
-    foreach ($profile in $userProfiles) {
-        $ntuser = "$($profile.FullName)\NTUSER.DAT"
+    foreach ($userProf in $userProfiles) {
+        $ntuser = "$($userProf.FullName)\NTUSER.DAT"
         if (Test-Path $ntuser) {
-            $hiveName = "HKU\OEMClean_$($profile.Name)"
+            $hiveName = "HKU\OEMClean_$($userProf.Name)"
             reg load $hiveName $ntuser 2>$null
             if ($LASTEXITCODE -eq 0) {
                 reg delete "$hiveName\SOFTWARE\Dell" /f 2>$null
@@ -2071,11 +2288,15 @@ if (-not $DryRun) {
 }
 
 Write-Host "  OEM nuclear clean complete" -ForegroundColor Green
+} else { Write-Log "[Phase 2/7] OEM cleanup SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # PHASE 2C: ONEDRIVE REMOVAL
 # ============================================================================
-if ($script:onedriveInUse) {
+Update-Phase "OneDrive Removal"
+if (-not (Test-PhaseEnabled 'OneDrive')) {
+    Write-Log "[Phase 3/7] OneDrive SKIPPED (phase excluded)" "INFO"
+} elseif ($script:onedriveInUse) {
     Write-Log "[Phase 3/7] OneDrive - SKIPPED (in use)" "SECTION"
 } else {
     Write-Log "[Phase 3/7] Removing OneDrive..." "SECTION"
@@ -2109,10 +2330,10 @@ if ($script:onedriveInUse) {
 
         # Clean OneDrive from all user profiles
         $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
-        foreach ($profile in $userProfiles) {
+        foreach ($userProf in $userProfiles) {
             @(
-                "$($profile.FullName)\AppData\Local\Microsoft\OneDrive",
-                "$($profile.FullName)\OneDrive"
+                "$($userProf.FullName)\AppData\Local\Microsoft\OneDrive",
+                "$($userProf.FullName)\OneDrive"
             ) | ForEach-Object {
                 if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
             }
@@ -2131,7 +2352,10 @@ if ($script:onedriveInUse) {
 # ============================================================================
 # PHASE 3: OFFICE NUCLEAR REMOVAL (Skip uninstallers, delete everything)
 # ============================================================================
-if ($script:officeInUse) {
+Update-Phase "Office Removal"
+if (-not (Test-PhaseEnabled 'Office')) {
+    Write-Log "[Phase 4/7] Office SKIPPED (phase excluded)" "INFO"
+} elseif ($script:officeInUse) {
     Write-Log "[Phase 4/7] Office - SKIPPED (in use)" "SECTION"
 } else {
     Write-Log "[Phase 4/7] Office Nuclear Removal..." "SECTION"
@@ -2242,10 +2466,10 @@ if ($script:officeInUse) {
 
             # Delete Office folders from all user profiles
             $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
-            foreach ($profile in $userProfiles) {
+            foreach ($userProf in $userProfiles) {
                 @(
-                    "$($profile.FullName)\AppData\Local\Microsoft\Office",
-                    "$($profile.FullName)\AppData\Roaming\Microsoft\Office"
+                    "$($userProf.FullName)\AppData\Local\Microsoft\Office",
+                    "$($userProf.FullName)\AppData\Roaming\Microsoft\Office"
                 ) | ForEach-Object {
                     if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
                 }
@@ -2295,9 +2519,8 @@ if ($script:officeInUse) {
                 }
             }
 
-            # Clean Office licenses
+            # Clean Office licenses (Office-only; do NOT touch Windows product key)
             Write-Host "  Cleaning Office licenses..." -ForegroundColor Gray
-            cscript //nologo "C:\Windows\System32\slmgr.vbs" /upk 2>$null
             Get-WmiObject -Query "SELECT * FROM SoftwareLicensingProduct WHERE ApplicationId='0ff1ce15-a989-479d-af46-f275c6370663' AND PartialProductKey IS NOT NULL" -EA 0 | ForEach-Object {
                 $_.UninstallProductKey($_.ProductKeyID) 2>$null
             }
@@ -2314,9 +2537,12 @@ if ($script:officeInUse) {
 # ============================================================================
 # DISABLE BLOATWARE SERVICES
 # ============================================================================
+Update-Phase "Service Cleanup"
+if (Test-PhaseEnabled 'Services') {
 Write-Host "`n[Cleanup] Disabling bloatware services..." -ForegroundColor Yellow
 
-$servicesToDisable = @(
+# Allow config file to override the service list
+$servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable')) { $script:configOverrides.ServicesToDisable } else { @(
     # Telemetry & Diagnostics
     'DiagTrack',                    # Diagnostics Tracking
     'dmwappushservice',             # WAP Push Message Routing
@@ -2371,10 +2597,29 @@ $servicesToDisable = @(
     # REMOVED: SSDPSRV (UPnP - some medical equipment uses this)
     # REMOVED: WbioSrvc (fingerprint login on laptops)
     # REMOVED: TabletInputService (touch input)
-)
+) }
 
-foreach ($svc in $servicesToDisable) {
-    Disable-ServiceDryRun -ServiceName $svc
+# Parallel service disable on PS7+; sequential fallback on PS5
+if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $DryRun) {
+    # Parallel path: stop and disable in bulk, then record in manifest
+    $servicesToDisable | ForEach-Object -Parallel {
+        $svc = Get-Service -Name $_ -EA SilentlyContinue
+        if ($svc) {
+            Stop-Service -Name $_ -Force -EA SilentlyContinue
+            Set-Service -Name $_ -StartupType Disabled -EA SilentlyContinue
+        }
+    } -ThrottleLimit 8
+    # Record in manifest (must be sequential for thread-safe ArrayList)
+    foreach ($svc in $servicesToDisable) {
+        if (Get-Service -Name $svc -EA 0) {
+            $script:manifest.changes.services_disabled.Add($svc) | Out-Null
+            $script:counters.ServicesDisabled++
+        }
+    }
+} else {
+    foreach ($svc in $servicesToDisable) {
+        Disable-ServiceDryRun -ServiceName $svc
+    }
 }
 
 # Handle per-user services (have _XXXXX suffix)
@@ -2386,6 +2631,7 @@ foreach ($baseName in $perUserServices) {
 }
 
 Write-Host "  Bloatware services disabled" -ForegroundColor Green
+} else { Write-Log "[Services] SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # TEMP FILE CLEANUP
@@ -2399,8 +2645,8 @@ if (-not $DryRun) {
 
     # User temps (all profiles)
     $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
-    foreach ($profile in $userProfiles) {
-        Remove-Item "$($profile.FullName)\AppData\Local\Temp\*" -Recurse -Force -EA 0
+    foreach ($userProf in $userProfiles) {
+        Remove-Item "$($userProf.FullName)\AppData\Local\Temp\*" -Recurse -Force -EA 0
     }
 
     # Windows Update cache
@@ -2421,6 +2667,8 @@ Write-Host "  Temp files cleared" -ForegroundColor Green
 # ============================================================================
 # PHASE 5: EDGE DEBLOAT
 # ============================================================================
+Update-Phase "Edge Configuration"
+if (Test-PhaseEnabled 'Edge') {
 Write-Log "[Phase 5/7] Configuring Microsoft Edge..." "SECTION"
 
 # Close Edge first
@@ -2547,8 +2795,8 @@ if (-not $DryRun) {
 
     if (Test-Path $edgeUserData) {
         $edgeProfiles = Get-ChildItem $edgeUserData -Directory -EA 0 | Where-Object { $_.Name -match '^(Default|Profile)' }
-        foreach ($profile in $edgeProfiles) {
-            $bookmarksFile = Join-Path $profile.FullName "Bookmarks"
+        foreach ($userProf in $edgeProfiles) {
+            $bookmarksFile = Join-Path $userProf.FullName "Bookmarks"
             if (Test-Path $bookmarksFile) {
                 try {
                     $content = Get-Content $bookmarksFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -2614,10 +2862,13 @@ if (-not $DryRun) {
 }
 
 Write-Host "  Edge configured" -ForegroundColor Green
+} else { Write-Log "[Phase 5/7] Edge SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # PHASE 6: MAVEN FIREWALL RULES
 # ============================================================================
+Update-Phase "Firewall Rules"
+if (Test-PhaseEnabled 'Firewall') {
 Write-Log "[Phase 6/7] Importing Maven firewall rules..." "SECTION"
 
 if (-not $DryRun) {
@@ -2683,10 +2934,13 @@ Chrome-mDNS-In	Google Chrome mDNS	Inbound	Allow	UDP	5353	Any	C:\Program Files\Go
 } else {
     Write-Host "  [DRY RUN] Would import 21 firewall rules" -ForegroundColor Cyan
 }
+} else { Write-Log "[Phase 6/7] Firewall SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # PHASE 7: PRIVACY CLEANUP
 # ============================================================================
+Update-Phase "Privacy Cleanup"
+if (Test-PhaseEnabled 'Privacy') {
 Write-Log "[Phase 7/7] Running privacy cleanup..." "SECTION"
 
 if (-not $DryRun) {
@@ -2728,6 +2982,12 @@ if (-not $DryRun) {
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Start_TrackProgs" -Value 0
 
 Write-Host "  Privacy cleanup complete" -ForegroundColor Green
+} else { Write-Log "[Phase 7/7] Privacy SKIPPED (phase excluded)" "INFO" }
+
+# Complete progress bar
+if (-not $Silent -and [Environment]::UserInteractive) {
+    Write-Progress -Activity "Debloat-Win11" -Completed
+}
 
 # ============================================================================
 # POST-DEBLOAT: RE-ENABLE ESSENTIAL SERVICES
