@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.1.0
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.2.0
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -555,7 +555,8 @@ if ($WimPath) {
 # Merge external .psd1 config into the session, overriding built-in arrays
 $script:configOverrides = @{}
 $script:validConfigKeys = @('RemovePatterns','ServicesToDisable','DefenderExclusions','EdgeBookmarks',
-                            'StartupBloat','TasksToDisable','FeaturesToDisable','FirewallRules')
+                            'StartupBloat','TasksToDisable','FeaturesToDisable','FirewallRules',
+                            'DarkMode','OemExclude')
 if ($ConfigPath) {
     if (!(Test-Path $ConfigPath)) {
         Write-Host "ERROR: Config file not found: $ConfigPath" -ForegroundColor Red
@@ -635,7 +636,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.1.0'
+    version   = 'v2.2.0'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
@@ -802,7 +803,7 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.1.0 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.2.0 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -1345,11 +1346,24 @@ if (Test-Path $maintainScript) {
         $existingTask = Get-ScheduledTask -TaskName $taskName -EA 0
         if (-not $existingTask) {
             $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-ExecutionPolicy Bypass -NonInteractive -File `"$maintainScript`""
-            $trigger = New-ScheduledTaskTrigger -AtLogOn
+            # Trigger on WU completion (Event ID 19 = installation complete) + daily fallback
+            $wuTrigger = New-ScheduledTaskTrigger -Daily -At '03:00'
             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest -LogonType ServiceAccount
             $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Re-applies privacy/telemetry tweaks after Windows Update resets them' -EA 0 | Out-Null
-            Write-Log "  Scheduled task '$taskName' registered (runs at logon as SYSTEM)" "SUCCESS"
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $wuTrigger -Principal $principal -Settings $settings -Description 'Re-applies privacy/telemetry tweaks after Windows Update resets them' -EA 0 | Out-Null
+            # Add event-based trigger for WU completion (supplements the daily trigger)
+            $taskXml = (Get-ScheduledTask -TaskName $taskName -EA 0).Xml
+            if ($taskXml) {
+                $wuEventTrigger = @"
+  <EventTrigger>
+    <Enabled>true</Enabled>
+    <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Microsoft-Windows-WindowsUpdateClient/Operational"&gt;&lt;Select Path="Microsoft-Windows-WindowsUpdateClient/Operational"&gt;*[System[EventID=19]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+  </EventTrigger>
+"@
+                $taskXml = $taskXml -replace '(</Triggers>)', "$wuEventTrigger`$1"
+                Register-ScheduledTask -TaskName $taskName -Xml $taskXml -Force -EA 0 | Out-Null
+            }
+            Write-Log "  Scheduled task '$taskName' registered (WU-completion + daily 3AM)" "SUCCESS"
         } else {
             Write-Log "  Scheduled task '$taskName' already exists" "INFO"
         }
@@ -1382,6 +1396,15 @@ try {
     Write-Log "Could not write undo manifest" "WARNING"
 }
 
+# Write registry version stamp for Intune native detection
+if (-not $DryRun) {
+    $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
+    if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
+    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.2.0" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
+}
+
 # ============================================================================
 # GENERATE STANDALONE REVERT SCRIPT
 # ============================================================================
@@ -1389,7 +1412,7 @@ $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.1.0") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.2.0") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('') | Out-Null
@@ -1531,7 +1554,7 @@ Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.1.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.2.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 

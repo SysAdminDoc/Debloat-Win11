@@ -155,10 +155,15 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" -Name "Se
 # Combine taskbar buttons when taskbar is full (0=always, 1=when full, 2=never)
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarGlomLevel" -Value 1
 
-# Dark mode
-Write-Log "  Enabling dark mode..." "INFO"
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
+# Dark mode (skip if config overrides DarkMode to $false)
+$applyDarkMode = if ($script:configOverrides.ContainsKey('DarkMode')) { $script:configOverrides.DarkMode } else { $true }
+if ($applyDarkMode) {
+    Write-Log "  Enabling dark mode..." "INFO"
+    Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
+    Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
+} else {
+    Write-Log "  Dark mode: SKIPPED (DarkMode=false in config)" "INFO"
+}
 
 # Remove Microsoft Store pin from taskbar
 if (-not $DryRun) {

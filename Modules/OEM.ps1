@@ -9,9 +9,25 @@ Write-Rationale 'OEM'
 
 # Intel chipset/driver services and processes that must NOT be killed
 $script:oemSafeIntelPattern = 'igfx|IntelAudio|Intel.*Driver|Intel.*Chipset|IntcDAud|IntcOED|IntelManagementEngine|imesrv|jhi_service|LMS'
+$script:oemMatchPattern = 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer'
+
+# Config-driven OEM manufacturer exclusion
+$script:oemExclude = if ($script:configOverrides.ContainsKey('OemExclude')) { $script:configOverrides.OemExclude } else { @() }
+
+function Test-OemTarget {
+    param([string]$Name, [string]$DisplayName)
+    if ($script:oemExclude.Count -gt 0) {
+        foreach ($excl in $script:oemExclude) {
+            if ($Name -match $excl -or $DisplayName -match $excl) { return $false }
+        }
+    }
+    $isOem = ($Name -match $script:oemMatchPattern -or $DisplayName -match $script:oemMatchPattern)
+    $isSafe = ($Name -match $script:oemSafeIntelPattern -or $DisplayName -match $script:oemSafeIntelPattern)
+    return ($isOem -and -not $isSafe)
+}
 
 Write-Log "  Disabling OEM services..." "INFO"
-$oemServices = @(Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern })
+$oemServices = @(Get-Service | Where-Object { Test-OemTarget $_.Name $_.DisplayName })
 $script:counters.OEMCleaned += $oemServices.Count
 if (-not $DryRun) {
     foreach ($svc in $oemServices) {
@@ -20,7 +36,7 @@ if (-not $DryRun) {
     }
 
     Write-Log "  Killing OEM processes..." "INFO"
-    Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
+    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | ForEach-Object {
         Stop-Process -Id $_.Id -Force -EA 0
     }
 }
@@ -43,8 +59,8 @@ Write-Log "  OEM AppX packages removed" "SUCCESS"
 Write-Log "[OEM] OEM Nuclear Clean..." "SECTION"
 
 if (-not $DryRun) {
-    # Kill all OEM processes again (in case any respawned), preserving Intel drivers
-    Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | Stop-Process -Force -EA 0
+    # Kill all OEM processes again (in case any respawned)
+    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | Stop-Process -Force -EA 0
 
     # Delete OEM folders - Program Files
     Write-Log "  Nuking OEM folders..." "INFO"
@@ -174,7 +190,7 @@ if (-not $DryRun) {
 
     # Delete OEM services (preserving Intel chipset/driver services)
     Write-Log "  Nuking OEM services..." "INFO"
-    Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
+    Get-Service | Where-Object { Test-OemTarget $_.Name $_.DisplayName } | ForEach-Object {
         $script:manifest.changes.services_deleted.Add($_.Name) | Out-Null
         Stop-Service -Name $_.Name -Force -EA 0
         sc.exe delete $_.Name 2>$null
@@ -399,8 +415,8 @@ if (-not $DryRun) {
         Remove-ItemProperty -Path $startupApprovedPath32_2 -Name 'WavesSvc64' -Force -EA 0
     }
 
-    # Final process kill (preserving Intel chipset/driver processes)
-    Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | Stop-Process -Force -EA 0
+    # Final process kill
+    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | Stop-Process -Force -EA 0
 }
 
 Write-Log "  OEM nuclear clean complete" "SUCCESS"

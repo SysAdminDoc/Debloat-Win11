@@ -169,8 +169,8 @@
 
             # Clean Office licenses (Office-only; do NOT touch Windows product key)
             Write-Log "  Cleaning Office licenses..." "INFO"
-            Get-WmiObject -Query "SELECT * FROM SoftwareLicensingProduct WHERE ApplicationId='0ff1ce15-a989-479d-af46-f275c6370663' AND PartialProductKey IS NOT NULL" -EA 0 | ForEach-Object {
-                $_.UninstallProductKey($_.ProductKeyID) 2>$null
+            Get-CimInstance -Query "SELECT * FROM SoftwareLicensingProduct WHERE ApplicationId='0ff1ce15-a989-479d-af46-f275c6370663' AND PartialProductKey IS NOT NULL" -EA 0 | ForEach-Object {
+                Invoke-CimMethod -InputObject $_ -MethodName 'UninstallProductKey' -Arguments @{ ProductKey = $_.ProductKeyID } -EA 0
             }
 
             Write-Log "  Office nuclear removal complete" "SUCCESS"

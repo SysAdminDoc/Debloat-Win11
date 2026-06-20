@@ -7,29 +7,30 @@
 #   Script file: Detect-Debloat.ps1
 #   Run script as 32-bit process: No
 
-$expectedVersion = 'v2.1.0'
+$expectedVersion = 'v2.2.0'
 $logDir = "$env:ProgramData\Debloat-Win11\Logs"
 
-if (!(Test-Path $logDir)) { exit 1 }
+# Check registry stamp first (survives file cleanup, compatible with Intune native rules)
+$regStamp = Get-ItemProperty "HKLM:\SOFTWARE\Debloat-Win11" -EA SilentlyContinue
+if ($regStamp -and $regStamp.Version -eq $expectedVersion) {
+    Write-Output "Debloat-Win11 $expectedVersion detected (registry stamp)"
+    exit 0
+}
 
-# Find the most recent manifest file
-$manifests = Get-ChildItem -Path $logDir -Filter 'Debloat-Manifest-*.json' -File -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending
+# Fallback: check manifest file
+if (Test-Path $logDir) {
+    $manifests = Get-ChildItem -Path $logDir -Filter 'Debloat-Manifest-*.json' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
 
-if ($manifests.Count -eq 0) { exit 1 }
-
-$latestManifest = $manifests[0]
-
-try {
-    $data = Get-Content $latestManifest.FullName -Raw | ConvertFrom-Json
-
-    # Check version matches and it was not a dry run
-    if ($data.version -eq $expectedVersion -and $data.dryrun -eq $false) {
-        Write-Output "Debloat-Win11 $expectedVersion detected (manifest: $($latestManifest.Name))"
-        exit 0
+    if ($manifests.Count -gt 0) {
+        try {
+            $data = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
+            if ($data.version -eq $expectedVersion -and $data.dryrun -eq $false) {
+                Write-Output "Debloat-Win11 $expectedVersion detected (manifest: $($manifests[0].Name))"
+                exit 0
+            }
+        } catch {}
     }
-} catch {
-    # Malformed JSON
 }
 
 exit 1

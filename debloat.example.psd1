@@ -13,6 +13,8 @@
 #   TasksToDisable      - Scheduled task names to disable (wildcard patterns)
 #   FeaturesToDisable   - Windows optional features to disable
 #   FirewallRules       - Tab-delimited CSV string defining firewall rules
+#   DarkMode            - $true (default) to apply dark mode, $false to preserve user theme
+#   OemExclude          - Manufacturer names to exclude from OEM nuclear cleanup (e.g., @('Dell','HP'))
 
 @{
     # AppX packages to remove (wildcard patterns)
@@ -107,4 +109,13 @@
     # Name	DisplayName	Direction	Action	Protocol	LocalPort	RemotePort	Program
     # Custom-Rule-1	My Custom Rule	Inbound	Allow	TCP	8080	Any	System
     # "@
+
+    # Dark mode (default: $true -- applies dark theme to apps and system)
+    # Set to $false to preserve user's existing theme preferences
+    # DarkMode = $true
+
+    # OEM manufacturer exclusion (default: none -- all detected OEM bloat is removed)
+    # Add manufacturer names to skip during OEM nuclear cleanup
+    # Useful when you need Dell BIOS utilities, HP Sure Click, etc.
+    # OemExclude = @('Dell', 'HP')
 }
