@@ -21,8 +21,9 @@ Describe 'Script Structure' {
         $scriptContent | Should -Match '\[string\[\]\]\$Skip'
     }
 
-    It 'does not declare dead $Explain parameter' {
-        $scriptContent | Should -Not -Match '\[switch\]\$Explain'
+    It 'declares $Explain parameter with rationale support' {
+        $scriptContent | Should -Match '\[switch\]\$Explain'
+        $scriptContent | Should -Match 'phaseRationale'
     }
 
     It 'defines valid phase list' {

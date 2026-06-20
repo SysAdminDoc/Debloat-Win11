@@ -17,7 +17,8 @@ param(
     [string]$ConfigPath,
     [string[]]$Only,
     [string[]]$Skip,
-    [switch]$Silent
+    [switch]$Silent,
+    [switch]$Explain
 )
 
 # ============================================================================
@@ -26,6 +27,31 @@ param(
 if ($UndoFile -and $DryRun) {
     Write-Host "ERROR: -UndoFile and -DryRun cannot be used together" -ForegroundColor Red
     exit 2
+}
+
+# Explain mode: forces DryRun + prints rationale for each planned change
+if ($Explain) { $DryRun = [switch]::new($true) }
+
+$script:phaseRationale = @{
+    SystemTweaks = "Disables telemetry, ads, and tracking. Applies UI preferences (dark mode, classic context menu). Configures Windows Update deferrals."
+    AppX         = "Removes 80+ pre-installed consumer/OEM apps that consume disk, RAM, and bandwidth. Preserves essential utilities (Calculator, Notepad, Terminal, etc.)."
+    OEM          = "Removes manufacturer bloatware (Dell, HP, Lenovo, ASUS, Acer, MSI, Razer) including services, scheduled tasks, folders, and registry entries."
+    OneDrive     = "Removes OneDrive if no account is signed in and no files exist. Skipped automatically when in use."
+    Office       = "Removes Office if no license is detected and no Office apps are running. Skipped automatically when in use."
+    Edge         = "Applies 100+ Edge Group Policy settings to disable telemetry, Copilot, shopping, and ads. Sets Google as default search. Installs uBlock Origin."
+    Firewall     = "Imports file/printer sharing rules. Additional vendor rules available via -ConfigPath."
+    Privacy      = "Clears browser caches, diagnostic logs, thumbnail cache, recent files, and event logs."
+    Services     = "Disables 30+ telemetry, gaming, and unused services. Preserves critical services (IPv6, USB detection, biometrics, proxy)."
+    Power        = "Sets hardware-aware power plan: High Performance for desktops, Balanced with smart battery for laptops."
+    Network      = "Sets Private network profile, disables Nagle's algorithm for lower latency, enables network discovery."
+    StartMenu    = "Clears Start Menu suggestions and pinned bloatware tiles."
+}
+
+function Write-Rationale {
+    param([string]$Phase)
+    if ($Explain -and $script:phaseRationale.ContainsKey($Phase)) {
+        Write-Log "  WHY: $($script:phaseRationale[$Phase])" "INFO"
+    }
 }
 
 # ============================================================================
@@ -330,7 +356,8 @@ function Disable-TaskDryRun {
 # STARTUP BANNER
 # ============================================================================
 Write-Log "=== WINDOWS DEBLOAT v2.0.0 STARTING ===" "INFO"
-if ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
+if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
+elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
 
 # Capture initial disk space for summary
@@ -352,6 +379,14 @@ Write-Log "[Pre-Check] Windows version: $osName (Build $osBuild)" "INFO"
 if ($osVersion.Major -lt 10) {
     Write-Log "ERROR: This script requires Windows 10 or later" "ERROR"
     exit 2
+}
+
+# Detect Enterprise LTSC editions (lack Store apps, Copilot, consumer features)
+$script:isLTSC = $false
+$editionId = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -EA 0).EditionID
+if ($editionId -match 'EnterpriseS|IoTEnterpriseS|ServerRdsh') {
+    $script:isLTSC = $true
+    Write-Log "[Pre-Check] Enterprise LTSC/IoT edition detected -- consumer-app phases will be skipped" "WARNING"
 }
 
 # ============================================================================
@@ -699,6 +734,7 @@ if ($script:officeInUse) {
 Update-Phase "System Tweaks"
 if (Test-PhaseEnabled 'SystemTweaks') {
 Write-Log "[System Tweaks] Applying registry tweaks..." "SECTION"
+Write-Rationale 'SystemTweaks'
 
 # Privacy & Telemetry
 Write-Log "  Disabling telemetry & tracking..." "INFO"
@@ -1155,7 +1191,7 @@ Write-Log "  Explorer cleanup complete" "SUCCESS"
 # ============================================================================
 # WIDGETS REMOVAL (Windows 11)
 # ============================================================================
-if ([int]$osBuild -ge 22000) {
+if ([int]$osBuild -ge 22000 -and -not $script:isLTSC) {
     Write-Log "[Widgets] Removing Windows 11 Widgets..." "SECTION"
 
     # Disable Widgets
@@ -1722,6 +1758,10 @@ Write-Log "  Optional features configured" "SUCCESS"
 Update-Phase "AppX Package Removal"
 if (Test-PhaseEnabled 'AppX') {
 Write-Log "[Phase 1/7] Removing bloatware packages..." "SECTION"
+Write-Rationale 'AppX'
+if ($script:isLTSC) {
+    Write-Log "  LTSC edition: most consumer AppX packages are not present -- removals will be no-ops" "INFO"
+}
 
 # Allow config file to override the remove patterns
 $removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { $script:configOverrides.RemovePatterns } else { @(
@@ -1888,6 +1928,7 @@ if (-not $DryRun) {
 Update-Phase "OEM Cleanup"
 if (Test-PhaseEnabled 'OEM') {
 Write-Log "[Phase 2/7] Removing OEM bloatware..." "SECTION"
+Write-Rationale 'OEM'
 
 # Intel chipset/driver services and processes that must NOT be killed
 $script:oemSafeIntelPattern = 'igfx|IntelAudio|Intel.*Driver|Intel.*Chipset|IntcDAud|IntcOED|IntelManagementEngine|imesrv|jhi_service|LMS'
@@ -2305,6 +2346,7 @@ if (-not (Test-PhaseEnabled 'OneDrive')) {
     Write-Log "[Phase 3/7] OneDrive - SKIPPED (in use)" "SECTION"
 } else {
     Write-Log "[Phase 3/7] Removing OneDrive..." "SECTION"
+    Write-Rationale 'OneDrive'
 
     if (-not $DryRun) {
         # Kill OneDrive processes
@@ -2364,6 +2406,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
     Write-Log "[Phase 4/7] Office - SKIPPED (in use)" "SECTION"
 } else {
     Write-Log "[Phase 4/7] Office Nuclear Removal..." "SECTION"
+    Write-Rationale 'Office'
 
     if (-not $DryRun) {
         # Kill OneNote standalone installs first (all languages) - NUCLEAR
@@ -2548,6 +2591,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
 Update-Phase "Service Cleanup"
 if (Test-PhaseEnabled 'Services') {
 Write-Log "[Cleanup] Disabling bloatware services..." "SECTION"
+Write-Rationale 'Services'
 
 # Allow config file to override the service list
 $servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable')) { $script:configOverrides.ServicesToDisable } else { @(
@@ -2678,6 +2722,7 @@ Write-Log "  Temp files cleared" "SUCCESS"
 Update-Phase "Edge Configuration"
 if (Test-PhaseEnabled 'Edge') {
 Write-Log "[Phase 5/7] Configuring Microsoft Edge..." "SECTION"
+Write-Rationale 'Edge'
 
 # Close Edge first
 if (-not $DryRun) {
@@ -2879,6 +2924,7 @@ Write-Log "  Edge configured" "SUCCESS"
 Update-Phase "Firewall Rules"
 if (Test-PhaseEnabled 'Firewall') {
 Write-Log "[Phase 6/7] Importing firewall rules..." "SECTION"
+Write-Rationale 'Firewall'
 
 if (-not $DryRun) {
     # Enable firewall on all profiles
@@ -2940,6 +2986,7 @@ FPS-LLMNR-Out-UDP	File and Printer Sharing (LLMNR-UDP-Out)	Outbound	Allow	UDP	An
 Update-Phase "Privacy Cleanup"
 if (Test-PhaseEnabled 'Privacy') {
 Write-Log "[Phase 7/7] Running privacy cleanup..." "SECTION"
+Write-Rationale 'Privacy'
 
 if (-not $DryRun) {
     # Clear browser caches
@@ -2981,6 +3028,23 @@ Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
 
 Write-Log "  Privacy cleanup complete" "SUCCESS"
 } else { Write-Log "[Phase 7/7] Privacy SKIPPED (phase excluded)" "INFO" }
+
+# ============================================================================
+# OPTIONAL: WINGET APP UPDATES (keeps surviving apps current)
+# ============================================================================
+$wingetPath = Get-Command 'winget' -EA 0
+if ($wingetPath) {
+    Write-Log "[Updates] Updating surviving apps via winget..." "SECTION"
+    if (-not $DryRun) {
+        $wingetResult = & winget upgrade --all --silent --include-unknown --accept-source-agreements --accept-package-agreements 2>&1
+        $upgraded = ($wingetResult | Select-String 'Successfully installed').Count
+        Write-Log "  winget: $upgraded packages updated" "SUCCESS"
+    } else {
+        Write-Log "  [DRY RUN] Would run: winget upgrade --all --silent --include-unknown" "INFO"
+    }
+} else {
+    Write-Log "[Updates] winget not found -- skipping app updates" "INFO"
+}
 
 # Complete progress bar
 if (-not $Silent -and [Environment]::UserInteractive) {
