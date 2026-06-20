@@ -17,12 +17,9 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" 
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Siuf\Rules" -Name "NumberOfSIUFInPeriod" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Clipboard" -Name "EnableClipboardHistory" -Value 0
 
-# Disable telemetry services
-if (-not $DryRun) {
-    @("DiagTrack", "dmwappushservice", "lfsvc", "Fax") | ForEach-Object {
-        Stop-Service -Name $_ -Force -EA 0
-        Set-Service -Name $_ -StartupType Disabled -EA 0
-    }
+# Disable telemetry services (routed through helper for manifest tracking)
+@("DiagTrack", "dmwappushservice", "lfsvc", "Fax") | ForEach-Object {
+    Disable-ServiceDryRun -ServiceName $_
 }
 
 # Disable Copilot, Cortana, Recall
@@ -68,8 +65,6 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableCocreator"
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Services\IsoEnvBroker" -Name "Enabled" -Value 0
 
 # --- Disable Microsoft Copilot thoroughly (registry + AppX) ---
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
-Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowCopilotButton" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowCopilotButton" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\Shell\Copilot" -Name "IsCopilotAvailable" -Value 0
@@ -113,7 +108,6 @@ if (-not $teamsRunning) {
 # --- Disable Phone Link auto-start ---
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Mobility" -Name "OptedIn" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "EnableMmx" -Value 0
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarMn" -Value 0
 Remove-AppxDryRun -Pattern '*Microsoft.YourPhone*'
 Remove-AppxDryRun -Pattern '*MicrosoftWindows.CrossDevice*'
 if (-not $DryRun) {
@@ -129,9 +123,6 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" -Name "Bi
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "DisableWebSearch" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer" -Name "DisableSearchBoxSuggestions" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings" -Name "IsDynamicSearchBoxEnabled" -Value 0
-
-# Disable Widgets
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
 
 # Edge Telemetry
 Write-Log "  Disabling Edge telemetry..." "INFO"
@@ -169,8 +160,6 @@ if (-not $DryRun) {
     Remove-ItemProperty -Path $taskbandPath -Name "Favorites" -Force -EA 0
     Remove-ItemProperty -Path $taskbandPath -Name "FavoritesResolve" -Force -EA 0
 }
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "ShowRecent" -Value 0
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "ShowFrequent" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "HubMode" -Value 1
 
 # Classic context menu
@@ -220,13 +209,6 @@ $CDMPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManag
   "RotatingLockScreenOverlayEnabled") | ForEach-Object {
     Set-Reg -Path $CDMPath -Name $_ -Value 0
 }
-
-# Lock Screen Notifications
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings" -Name "NOC_GLOBAL_SETTING_ALLOW_TOASTS_ABOVE_LOCK" -Value 0
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings" -Name "NOC_GLOBAL_SETTING_ALLOW_CRITICAL_TOASTS_ABOVE_LOCK" -Value 0
-
-# Exclude drivers from Windows Update
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ExcludeWUDriversInQualityUpdate" -Value 1
 
 # ============================================================================
 # PERFORMANCE TWEAKS
@@ -333,67 +315,6 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" -
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ManagePreviewBuilds" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ManagePreviewBuildsPolicyValue" -Value 0
 
-Write-Log "  System tweaks applied" "SUCCESS"
-
-# ============================================================================
-# SSD OPTIMIZATION (If SSD detected)
-# ============================================================================
-if ($script:isSSD) {
-    Write-Log "[SSD] Applying SSD optimizations..." "SECTION"
-
-    if (-not $DryRun) {
-        # Disable scheduled defrag on SSD (Windows should do this automatically but ensure it)
-        $defragTask = Get-ScheduledTask -TaskName "ScheduledDefrag" -EA 0
-        if ($defragTask) {
-            # Don't disable entirely, but ensure SSD optimization mode
-            Write-Log "  Configuring defrag for SSD optimization..." "INFO"
-        }
-
-        # Ensure TRIM is enabled
-        fsutil behavior set DisableDeleteNotify 0 | Out-Null
-        Write-Log "  TRIM enabled" "INFO"
-
-        # Disable Superfetch/SysMain on SSD (not needed, reduces writes)
-        Stop-Service -Name 'SysMain' -Force -EA 0
-        Set-Service -Name 'SysMain' -StartupType Disabled -EA 0
-        Write-Log "  Superfetch disabled (not needed on SSD)" "INFO"
-
-        # Disable last access timestamp (reduces writes)
-        fsutil behavior set disablelastaccess 1 | Out-Null
-        Write-Log "  Last access timestamp disabled" "INFO"
-    } else {
-        Write-Log "  [DRY RUN] Would enable TRIM, disable Superfetch, disable last access timestamp" "INFO"
-    }
-
-    # Disable Prefetch on SSD
-    Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" -Name "EnablePrefetcher" -Value 0
-    Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" -Name "EnableSuperfetch" -Value 0
-    Write-Log "  Prefetch disabled (not needed on SSD)" "INFO"
-
-    Write-Log "  SSD optimizations applied" "SUCCESS"
-} else {
-    Write-Log "[HDD] Keeping HDD-optimized settings..." "SECTION"
-    if (-not $DryRun) {
-        # Keep Superfetch enabled for HDD
-        Set-Service -Name 'SysMain' -StartupType Automatic -EA 0
-        Start-Service -Name 'SysMain' -EA 0
-    }
-    Write-Log "  Superfetch enabled (improves HDD performance)" "INFO"
-}
-
-# ============================================================================
-# WINDOWS UPDATE CONTROL (Active Hours & Deferrals)
-# ============================================================================
-Write-Log "[Windows Update] Configuring update behavior..." "SECTION"
-
-# Set active hours to prevent auto-restart during work (6 AM - 11 PM)
-Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "ActiveHoursStart" -Value 6
-Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "ActiveHoursEnd" -Value 23
-Write-Log "  Active hours: 6 AM - 11 PM (no auto-restart)" "INFO"
-
-# Disable auto-restart with logged on users
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoRebootWithLoggedOnUsers" -Value 1
-
 # Defer feature updates by 365 days (security updates still apply)
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "DeferFeatureUpdates" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "DeferFeatureUpdatesPeriodInDays" -Value 365
@@ -410,7 +331,50 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "S
 # Notify before download/install (don't auto-install)
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "AUOptions" -Value 2
 
-Write-Log "  Windows Update configured" "SUCCESS"
+Write-Log "  System tweaks applied" "SUCCESS"
+
+# ============================================================================
+# SSD OPTIMIZATION (If SSD detected)
+# ============================================================================
+if ($script:isSSD) {
+    Write-Log "[SSD] Applying SSD optimizations..." "SECTION"
+
+    if (-not $DryRun) {
+        # Disable scheduled defrag on SSD (Windows should do this automatically but ensure it)
+        $defragTask = Get-ScheduledTask -TaskName "ScheduledDefrag" -EA 0
+        if ($defragTask) {
+            Write-Log "  Configuring defrag for SSD optimization..." "INFO"
+        }
+
+        # Ensure TRIM is enabled
+        fsutil behavior set DisableDeleteNotify 0 | Out-Null
+        Write-Log "  TRIM enabled" "INFO"
+
+        # Disable last access timestamp (reduces writes)
+        fsutil behavior set disablelastaccess 1 | Out-Null
+        Write-Log "  Last access timestamp disabled" "INFO"
+    } else {
+        Write-Log "  [DRY RUN] Would enable TRIM, disable last access timestamp" "INFO"
+    }
+
+    # Disable Superfetch/SysMain on SSD (routed through helper for manifest tracking)
+    Disable-ServiceDryRun -ServiceName 'SysMain'
+    Write-Log "  Superfetch disabled (not needed on SSD)" "INFO"
+
+    # Disable Prefetch on SSD
+    Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" -Name "EnablePrefetcher" -Value 0
+    Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" -Name "EnableSuperfetch" -Value 0
+    Write-Log "  Prefetch disabled (not needed on SSD)" "INFO"
+
+    Write-Log "  SSD optimizations applied" "SUCCESS"
+} else {
+    Write-Log "[HDD] Keeping HDD-optimized settings..." "SECTION"
+    if (-not $DryRun) {
+        Set-Service -Name 'SysMain' -StartupType Automatic -EA 0
+        Start-Service -Name 'SysMain' -EA 0
+    }
+    Write-Log "  Superfetch enabled (improves HDD performance)" "INFO"
+}
 
 # ============================================================================
 # START MENU CLEANUP (Unpin Bloatware Tiles)
@@ -473,10 +437,6 @@ Write-Log "  Explorer cleanup complete" "SUCCESS"
 # ============================================================================
 if ([int]$osBuild -ge 22000 -and -not $script:isLTSC) {
     Write-Log "[Widgets] Removing Windows 11 Widgets..." "SECTION"
-
-    # Disable Widgets
-    Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
-    Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarDa" -Value 0
 
     # Remove Widgets package (Remove-AppxDryRun handles both user and provisioned)
     Remove-AppxDryRun -Pattern '*WebExperience*'
