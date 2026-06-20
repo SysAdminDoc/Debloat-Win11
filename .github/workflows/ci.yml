@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -SkipPublisherCheck
+          $results = Invoke-ScriptAnalyzer -Path .\Debloat-Win11.ps1 -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost
+          if ($results) {
+            $results | Format-Table -AutoSize
+            throw "$($results.Count) PSScriptAnalyzer issues found"
+          }
+          Write-Host "PSScriptAnalyzer: No issues found"
+
+      - name: Run Pester Tests
+        shell: pwsh
+        run: |
+          $result = Invoke-Pester ./tests/ -Passthru
+          if ($result.FailedCount -gt 0) {
+            throw "$($result.FailedCount) Pester tests failed"
+          }
+          Write-Host "Pester: $($result.PassedCount) tests passed"
