@@ -44,22 +44,44 @@ if ($Explain) { $DryRun = [switch]::new($true) }
 # ============================================================================
 if ($CheckDrift) {
     $driftChecks = @(
+        # Privacy & Telemetry
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Name = 'AllowTelemetry'; Expected = 0 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; Name = 'EnableActivityFeed'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Expected = 0 }
+        # AI & Copilot
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Expected = 1 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAIDataAnalysis'; Expected = 1 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'AllowRecallEnablement'; Expected = 0 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableClickToDo'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableSettingsAgent'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAgentWorkspaces'; Expected = 2 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAgentConnectors'; Expected = 2 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'TurnOffSavingSnapshots'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableCocreator'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableImageCreator'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\WindowsNotepad'; Name = 'DisableAIFeatures'; Expected = 1 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Expected = 0 }
+        # Consumer features & ads
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Name = 'DisableWindowsConsumerFeatures'; Expected = 1 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh'; Name = 'AllowNewsAndInterests'; Expected = 0 }
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Name = 'DisableWebSearch'; Expected = 1 }
-        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Expected = 0 }
-        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Expected = 0 }
         @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'SilentInstalledAppsEnabled'; Expected = 0 }
         @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'ContentDeliveryAllowed'; Expected = 0 }
-        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Expected = 0 }
-        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarDa'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'PreInstalledAppsEnabled'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'OemPreInstalledAppsEnabled'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'FeatureManagementEnabled'; Expected = 0 }
         @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_IrisRecommendations'; Expected = 0 }
         @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement'; Name = 'ScoobeSystemSettingEnabled'; Expected = 0 }
+        # Search & Bing
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Name = 'DisableWebSearch'; Expected = 1 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Expected = 0 }
+        # Widgets & UI
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarDa'; Expected = 0 }
+        # Edge telemetry
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Name = 'DiagnosticData'; Expected = 0 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Name = 'EdgeCopilotEnabled'; Expected = 0 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'; Name = 'HubsSidebarEnabled'; Expected = 0 }
+        # Security
+        @{ Path = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest'; Name = 'UseLogonCredential'; Expected = 0 }
     )
 
     Write-Host "=== DRIFT DETECTION ===" -ForegroundColor Yellow
@@ -756,6 +778,26 @@ function Disable-TaskDryRun {
         }
     }
 }
+
+# ============================================================================
+# CONCURRENT EXECUTION GUARD
+# ============================================================================
+$script:lockFile = "$LogDir\Debloat-Win11.lock"
+if (Test-Path $script:lockFile) {
+    $lockContent = Get-Content $script:lockFile -Raw -EA 0
+    Write-Log "ERROR: Another instance is already running (lock: $lockContent). Aborting." "ERROR"
+    exit 2
+}
+try {
+    "PID=$PID Started=$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')" | Set-Content $script:lockFile -Force -EA Stop
+} catch {
+    Write-Log "ERROR: Could not create lock file: $_" "ERROR"
+    exit 2
+}
+# Ensure lockfile is cleaned up on exit (normal or abnormal)
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    Remove-Item $script:lockFile -Force -EA 0
+} | Out-Null
 
 # ============================================================================
 # STARTUP BANNER
@@ -1525,5 +1567,8 @@ if ($script:exitCode -ne 0) {
 }
 
 Write-Host "`nRestart recommended to apply all changes." -ForegroundColor Yellow
+
+# Clean up lockfile
+Remove-Item $script:lockFile -Force -EA 0
 
 exit $script:exitCode

@@ -31,6 +31,41 @@ if (-not $DryRun) {
     }
 }
 
+# Set RemoveDefaultMicrosoftStorePackages policy on Enterprise/Education 24H2+
+# This Microsoft-supported policy blocks reinstallation after Windows Update
+if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
+    $policyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx"
+    Set-Reg -Path $policyPath -Name "RemoveDefaultMicrosoftStorePackages" -Value 1
+    $pfnPath = "$policyPath\RemoveDefaultMicrosoftStorePackages"
+    if (!(Test-Path $pfnPath)) { New-Item -Path $pfnPath -Force | Out-Null }
+    $storePfns = @(
+        'Clipchamp.Clipchamp_yxz26nhyzhsrt',
+        'Microsoft.BingNews_8wekyb3d8bbwe',
+        'Microsoft.BingWeather_8wekyb3d8bbwe',
+        'Microsoft.Copilot_8wekyb3d8bbwe',
+        'Microsoft.GamingApp_8wekyb3d8bbwe',
+        'Microsoft.GetHelp_8wekyb3d8bbwe',
+        'Microsoft.Getstarted_8wekyb3d8bbwe',
+        'Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe',
+        'Microsoft.MicrosoftSolitaireCollection_8wekyb3d8bbwe',
+        'Microsoft.OutlookForWindows_8wekyb3d8bbwe',
+        'Microsoft.Todos_8wekyb3d8bbwe',
+        'Microsoft.WindowsFeedbackHub_8wekyb3d8bbwe',
+        'MSTeams_8wekyb3d8bbwe',
+        'Microsoft.Xbox.TCUI_8wekyb3d8bbwe',
+        'Microsoft.XboxGamingOverlay_8wekyb3d8bbwe',
+        'Microsoft.XboxIdentityProvider_8wekyb3d8bbwe',
+        'Microsoft.XboxSpeechToTextOverlay_8wekyb3d8bbwe',
+        'Microsoft.ZuneMusic_8wekyb3d8bbwe'
+    )
+    $idx = 1
+    foreach ($pfn in $storePfns) {
+        Set-Reg -Path $pfnPath -Name "$idx" -Value $pfn -Type "String"
+        $idx++
+    }
+    Write-Log "  RemoveDefaultMicrosoftStorePackages policy set ($($storePfns.Count) packages)" "INFO"
+}
+
 Write-Log "  Bloatware packages removed" "SUCCESS"
 
 # Remove Remote Desktop Connection shortcuts (mstsc is a system component)

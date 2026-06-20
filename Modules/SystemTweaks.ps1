@@ -52,9 +52,10 @@ if (-not $DryRun) {
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableClickToDo" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableClickToDo" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableSettingsAgent" -Value 1
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentConnectors" -Value 1
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentWorkspaces" -Value 1
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRemoteAgentConnectors" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentConnectors" -Value 2
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentWorkspaces" -Value 2
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRemoteAgentConnectors" -Value 2
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRecallDataProviders" -Value 1
 
 # --- Disable Paint AI features (Cocreator, Image Creator, Generative Fill) ---
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableImageCreator" -Value 1
@@ -64,7 +65,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableCocreator"
 # --- Disable IsoEnvBroker (Agent Workspaces) ---
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Services\IsoEnvBroker" -Name "Enabled" -Value 0
 
-# --- Disable Microsoft Copilot thoroughly (registry + AppX) ---
+# --- Disable Microsoft Copilot thoroughly (registry + AppX + policy) ---
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowCopilotButton" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowCopilotButton" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\Shell\Copilot" -Name "IsCopilotAvailable" -Value 0
@@ -72,6 +73,11 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "HubsSidebarEnabled
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "CopilotCDPPageContext" -Value 0
 Remove-AppxDryRun -Pattern '*Microsoft.Copilot*'
 Remove-AppxDryRun -Pattern '*Microsoft.Windows.Ai.Copilot.Provider*'
+# RemoveMicrosoftCopilotApp policy (Enterprise/Education only, 24H2+)
+if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
+    Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "RemoveMicrosoftCopilotApp" -Value 1
+    Write-Log "  RemoveMicrosoftCopilotApp policy set (Enterprise/Education 24H2+)" "INFO"
+}
 
 # --- Block M365 Copilot auto-start ---
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\M365Copilot" -Name "AutoStartDelayEnabled" -Value 0
@@ -1018,38 +1024,13 @@ Write-Log "  Optional features configured" "SUCCESS"
 if ($AllUsers -and -not $DryRun) {
     Write-Log "[AllUsers] Applying HKCU tweaks to all user profiles..." "SECTION"
 
-    $hkcuTweaks = @(
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings'; Name = 'IsDynamicSearchBoxEnabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarAl'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowTaskViewButton'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarDa'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarMn'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'HideFileExt'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Hidden'; Value = 1 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_IrisRecommendations'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_AccountNotifications'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'LaunchTo'; Value = 1 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'AppsUseLightTheme'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'SystemUsesLightTheme'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer'; Name = 'ShowRecent'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer'; Name = 'ShowFrequent'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement'; Name = 'ScoobeSystemSettingEnabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Value = 1 }
-        @{ Path = 'SOFTWARE\Microsoft\Siuf\Rules'; Name = 'NumberOfSIUFInPeriod'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\InputPersonalization'; Name = 'RestrictImplicitTextCollection'; Value = 1 }
-        @{ Path = 'SOFTWARE\Microsoft\InputPersonalization'; Name = 'RestrictImplicitInkCollection'; Value = 1 }
-    )
-
-    $cdmKeys = @('SystemPaneSuggestionsEnabled', 'SubscribedContent-310093Enabled', 'SubscribedContent-338387Enabled',
-      'SubscribedContent-338388Enabled', 'SubscribedContent-338389Enabled', 'SubscribedContent-338393Enabled',
-      'SubscribedContent-353694Enabled', 'SubscribedContent-353696Enabled', 'SubscribedContent-353698Enabled',
-      'SilentInstalledAppsEnabled', 'SoftLandingEnabled', 'ContentDeliveryAllowed',
-      'OemPreInstalledAppsEnabled', 'PreInstalledAppsEnabled', 'FeatureManagementEnabled')
-    foreach ($key in $cdmKeys) {
-        $hkcuTweaks += @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = $key; Value = 0 }
+    # Load shared definitions from Modules/HkcuTweaks.psd1
+    $hkcuDataFile = Join-Path $PSScriptRoot 'Modules\HkcuTweaks.psd1'
+    if (Test-Path $hkcuDataFile) {
+        $hkcuTweaks = & ([scriptblock]::Create((Get-Content $hkcuDataFile -Raw)))
+    } else {
+        Write-Log "  WARNING: HkcuTweaks.psd1 not found, skipping AllUsers propagation" "WARNING"
+        $hkcuTweaks = @()
     }
 
     $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default User|All Users)$' }
