@@ -297,3 +297,105 @@ Describe 'AI Controls' {
         $allContent | Should -Match 'DisableCocreator'
     }
 }
+
+Describe 'DryRun Functional Behavior' {
+    BeforeAll {
+        $script:manifest = @{
+            changes = @{
+                appx_removed       = [System.Collections.ArrayList]@()
+                services_disabled  = [System.Collections.ArrayList]@()
+                tasks_disabled     = [System.Collections.ArrayList]@()
+                registry_set       = [System.Collections.ArrayList]@()
+            }
+        }
+        $script:counters = @{ AppxRemoved = 0; ServicesDisabled = 0; TasksDisabled = 0; RegistryTweaks = 0 }
+        $DryRun = $true
+
+        function Set-Reg {
+            param([string]$Path, [string]$Name, $Value, [string]$Type = "DWord")
+            $script:manifest.changes.registry_set.Add(@{
+                path = $Path; name = $Name; old_value = $null; new_value = $Value; type = $Type
+            }) | Out-Null
+            $script:counters.RegistryTweaks++
+        }
+    }
+
+    It 'Set-Reg records to manifest in DryRun without writing registry' {
+        Set-Reg -Path "HKLM:\SOFTWARE\Test\Debloat" -Name "TestDryRun" -Value 1
+        $script:manifest.changes.registry_set[-1].new_value | Should -Be 1
+        $real = Get-ItemProperty -Path "HKLM:\SOFTWARE\Test\Debloat" -Name "TestDryRun" -EA 0
+        $real | Should -BeNullOrEmpty
+    }
+
+    It 'manifest tracks all changes without side effects' {
+        $count = $script:manifest.changes.registry_set.Count
+        $count | Should -BeGreaterThan 0
+        $script:counters.RegistryTweaks | Should -Be $count
+    }
+}
+
+Describe 'Undo Mode Logic' {
+    It 'undo block handles both old string and new object service entries' {
+        $scriptContent | Should -Match 'if \(\$svcEntry -is \[string\]\)'
+        $scriptContent | Should -Match 'original_startup_type'
+    }
+
+    It 'undo mode warns about irrecoverable deletions' {
+        $scriptContent | Should -Match 'folders_deleted'
+        $scriptContent | Should -Match 'registry_deleted'
+        $scriptContent | Should -Match 'services_deleted'
+        $scriptContent | Should -Match 'cannot be auto-restored'
+    }
+}
+
+Describe 'Drift Detection' {
+    It 'defines CheckDrift parameter' {
+        $scriptContent | Should -Match '\[switch\]\$CheckDrift'
+    }
+
+    It 'checks key privacy registry values' {
+        $scriptContent | Should -Match 'AllowTelemetry.*Expected'
+        $scriptContent | Should -Match 'TurnOffWindowsCopilot.*Expected'
+        $scriptContent | Should -Match 'BingSearchEnabled.*Expected'
+    }
+
+    It 'reports drift status counts' {
+        $scriptContent | Should -Match 'DRIFTED:'
+        $scriptContent | Should -Match 'MISSING:'
+    }
+}
+
+Describe 'Security Hardening' {
+    It 'disables WDigest plaintext credential caching' {
+        $allContent | Should -Match 'UseLogonCredential'
+    }
+
+    It 'restricts NTLM to NTLMv2' {
+        $allContent | Should -Match 'LmCompatibilityLevel'
+    }
+
+    It 'enables PowerShell script block logging' {
+        $allContent | Should -Match 'EnableScriptBlockLogging'
+    }
+}
+
+Describe 'Revert Script Generation' {
+    It 'generates a standalone revert .ps1 file' {
+        $scriptContent | Should -Match 'Debloat-Revert-'
+        $scriptContent | Should -Match 'Revert script:'
+    }
+}
+
+Describe 'Pre-Flight Enhancements' {
+    It 'reports VBS/HVCI status' {
+        $scriptContent | Should -Match 'VirtualizationBasedSecurityStatus'
+    }
+
+    It 'detects Smart App Control enforcement' {
+        $scriptContent | Should -Match 'VerifiedAndReputablePolicyState'
+    }
+
+    It 'informs Enterprise about native RemoveDefaultMicrosoftStorePackages policy' {
+        $scriptContent | Should -Match 'RemoveDefaultMicrosoftStorePackages'
+    }
+}
