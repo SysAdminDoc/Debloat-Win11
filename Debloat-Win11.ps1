@@ -3239,6 +3239,62 @@ try {
 }
 
 # ============================================================================
+# HTML REPORT (self-contained single file)
+# ============================================================================
+$htmlReportFile = "$LogDir\Debloat-Report-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').html"
+try {
+    $dryLabel = if ($DryRun) { " (DRY RUN)" } else { "" }
+    $regRows = ($script:manifest.changes.registry_set | ForEach-Object {
+        "<tr><td>$($_.path)</td><td>$($_.name)</td><td>$($_.old_value)</td><td>$($_.new_value)</td></tr>"
+    }) -join "`n"
+    $svcRows = ($script:manifest.changes.services_disabled | ForEach-Object { "<tr><td>$_</td><td>Disabled</td></tr>" }) -join "`n"
+    $appRows = ($script:manifest.changes.appx_removed | ForEach-Object { "<tr><td>$_</td></tr>" }) -join "`n"
+    $taskRows = ($script:manifest.changes.tasks_disabled | ForEach-Object { "<tr><td>$_</td><td>Disabled</td></tr>" }) -join "`n"
+
+    $htmlContent = @"
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Debloat-Win11 Report$dryLabel</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#1e1e2e;color:#cdd6f4;margin:2em;line-height:1.5}
+h1{color:#89b4fa}h2{color:#a6e3a1;border-bottom:1px solid #45475a;padding-bottom:.3em;margin-top:1.5em}
+table{border-collapse:collapse;width:100%;margin:.5em 0}
+th,td{text-align:left;padding:6px 10px;border:1px solid #45475a;font-size:13px}
+th{background:#313244;color:#89b4fa}tr:nth-child(even){background:#181825}
+.stat{font-size:1.1em;margin:.3em 0}.stat b{color:#f9e2af}
+</style></head><body>
+<h1>Debloat-Win11 Report$dryLabel</h1>
+<p>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Host: $env:COMPUTERNAME | OS: $osName (Build $osBuild)</p>
+<div class="stat"><b>AppX Removed:</b> $($script:counters.AppxRemoved) | <b>Services Disabled:</b> $($script:counters.ServicesDisabled) | <b>Tasks Disabled:</b> $($script:counters.TasksDisabled) | <b>Registry Tweaks:</b> $($script:counters.RegistryTweaks)</div>
+
+<h2>Registry Changes ($($script:manifest.changes.registry_set.Count))</h2>
+<table><tr><th>Path</th><th>Name</th><th>Old Value</th><th>New Value</th></tr>
+$regRows
+</table>
+
+<h2>Services Disabled ($($script:manifest.changes.services_disabled.Count))</h2>
+<table><tr><th>Service</th><th>Action</th></tr>
+$svcRows
+</table>
+
+<h2>AppX Packages Removed ($($script:manifest.changes.appx_removed.Count))</h2>
+<table><tr><th>Package</th></tr>
+$appRows
+</table>
+
+<h2>Scheduled Tasks Disabled ($($script:manifest.changes.tasks_disabled.Count))</h2>
+<table><tr><th>Task</th><th>Action</th></tr>
+$taskRows
+</table>
+
+</body></html>
+"@
+    [System.IO.File]::WriteAllText($htmlReportFile, $htmlContent, [System.Text.Encoding]::UTF8)
+    Write-Log "HTML report: $htmlReportFile" "INFO"
+} catch {
+    Write-Log "Could not generate HTML report" "WARNING"
+}
+
+# ============================================================================
 # SUMMARY REPORT
 # ============================================================================
 $endTime = Get-Date
