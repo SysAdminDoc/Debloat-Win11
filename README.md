@@ -2,12 +2,12 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.0.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.1.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.0.0
+**Version:** v2.1.0
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
-**Lines of Code:** ~3,100
+**Lines of Code:** ~3,800
 **Compatibility:** Windows 10 (1903+) / Windows 11 (including 24H2/25H2)
 
 ---
@@ -57,6 +57,22 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.1.0
+- ✅ `-CheckDrift` mode reports registry values reset by Windows Update
+- ✅ `-AllUsers` flag applies HKCU tweaks to all user profiles (Intune/SCCM SYSTEM-level deployment)
+- ✅ Standalone revert script (`.ps1`) generated alongside JSON manifest for portable undo
+- ✅ Security hardening preset (`presets/security.psd1`) with WDigest, NTLMv2, SAM, PS logging
+- ✅ 8 config-overridable data arrays (added: StartupBloat, TasksToDisable, FeaturesToDisable, FirewallRules)
+- ✅ Config file schema validation (warns on unknown keys)
+- ✅ Paint AI policy controls (Cocreator, Image Creator, Generative Fill)
+- ✅ IsoEnvBroker (Agent Workspaces) service disabled
+- ✅ VBS/HVCI status and Smart App Control reporting in pre-flight
+- ✅ Undo mode records original service startup types and warns about irrecoverable deletions
+- ✅ Enterprise/Education 24H2+ informed about native RemoveDefaultMicrosoftStorePackages policy
+- ✅ CI expanded to scan all .ps1 files (orchestrator + 9 modules + companions)
+- ✅ Maintenance task now applies tweaks to all user profiles (not just SYSTEM)
+- ✅ 48 Pester tests (up from 27)
 
 ### New in v2.0.0
 - ✅ Real `-UndoFile` mode replays a manifest to reverse a prior run
@@ -215,6 +231,15 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 # Offline WIM image debloat (for sysprep/MDT)
 .\Debloat-Win11.ps1 -WimPath "D:\sources\install.wim" -WimIndex 1
+
+# Check for drifted settings (reset by Windows Update)
+.\Debloat-Win11.ps1 -CheckDrift
+
+# Apply HKCU tweaks to all user profiles (for SYSTEM-level deployment)
+.\Debloat-Win11.ps1 -AllUsers
+
+# Security hardening preset
+.\Debloat-Win11.ps1 -ConfigPath .\presets\security.psd1
 ```
 
 ### Option 2: One-Liner

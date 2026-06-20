@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.0.0
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.1.0
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -613,7 +613,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.0.0'
+    version   = 'v2.1.0'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
@@ -760,7 +760,7 @@ function Disable-TaskDryRun {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.0.0 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.1.0 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -1347,7 +1347,7 @@ $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.0.0") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.1.0") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('') | Out-Null
@@ -1489,7 +1489,7 @@ Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.0.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.1.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 
