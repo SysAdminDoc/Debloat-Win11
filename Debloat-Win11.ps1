@@ -413,6 +413,26 @@ if ($msixStaging) {
 $totalRAM = [math]::Round($computerSystem.TotalPhysicalMemory / 1GB, 1)
 Write-Log "  Total RAM: $totalRAM GB" "INFO"
 
+# Check for Windows S Mode (restricts AppX removal)
+$script:isSMode = $false
+$sModePol = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -EA 0
+if ($sModePol -and $sModePol.SkuPolicyRequired -eq 1) {
+    $script:isSMode = $true
+    Write-Log "ERROR: Windows is running in S Mode. AppX removal and sideloading are restricted." "ERROR"
+    Write-Log "  Switch out of S Mode in Settings > System > Activation before running this script." "ERROR"
+    exit 2
+}
+
+# Check Tamper Protection status (affects Defender changes)
+$script:tamperProtectionOn = $false
+$tpStatus = Get-MpComputerStatus -EA 0
+if ($tpStatus -and $tpStatus.IsTamperProtected) {
+    $script:tamperProtectionOn = $true
+    Write-Log "  Tamper Protection: ENABLED - Defender exclusion changes may not persist" "WARNING"
+} else {
+    Write-Log "  Tamper Protection: Disabled or not detected" "INFO"
+}
+
 # ============================================================================
 # SSD DETECTION & OPTIMIZATION
 # ============================================================================
@@ -1256,6 +1276,9 @@ Write-Log "  Notifications configured" "SUCCESS"
 # ============================================================================
 if (-not $KeepDefender) {
     Write-Log "[Defender] Adding folder exclusions..." "SECTION"
+    if ($script:tamperProtectionOn) {
+        Write-Log "  WARNING: Tamper Protection is enabled -- exclusions may be silently rejected" "WARNING"
+    }
 
     # Allow config file to override Defender exclusions
     $defenderExclusions = if ($script:configOverrides.ContainsKey('DefenderExclusions')) { $script:configOverrides.DefenderExclusions } else { @(
