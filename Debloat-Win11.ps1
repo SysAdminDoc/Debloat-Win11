@@ -188,10 +188,13 @@ $script:manifest = @{
     version   = 'v2.0.0'
     dryrun    = $DryRun.IsPresent
     changes   = @{
-        appx_removed      = [System.Collections.ArrayList]@()
+        appx_removed       = [System.Collections.ArrayList]@()
         services_disabled  = [System.Collections.ArrayList]@()
+        services_deleted   = [System.Collections.ArrayList]@()
         tasks_disabled     = [System.Collections.ArrayList]@()
         registry_set       = [System.Collections.ArrayList]@()
+        registry_deleted   = [System.Collections.ArrayList]@()
+        folders_deleted    = [System.Collections.ArrayList]@()
     }
 }
 
@@ -1599,6 +1602,15 @@ if (-not $DryRun) {
 Write-Log "[Context Menu] Removing bloat entries..." "SECTION"
 
 if (-not $DryRun) {
+    @(
+        'HKLM\SOFTWARE\Classes\SystemFileAssociations\*\Shell\3D Edit',
+        'HKCR\*\shellex\ContextMenuHandlers\ModernSharing',
+        'HKCR\*\shellex\ContextMenuHandlers\Sharing',
+        'HKCR\Folder\ShellEx\ContextMenuHandlers\Library Location',
+        'HKCR\*\shell\pintohomefile',
+        'HKCR\exefile\shellex\ContextMenuHandlers\Compatibility'
+    ) | ForEach-Object { $script:manifest.changes.registry_deleted.Add($_) | Out-Null }
+
     # Remove "Edit with Paint 3D" context menu
     reg delete "HKLM\SOFTWARE\Classes\SystemFileAssociations\.bmp\Shell\3D Edit" /f 2>$null
     reg delete "HKLM\SOFTWARE\Classes\SystemFileAssociations\.gif\Shell\3D Edit" /f 2>$null
@@ -1910,6 +1922,7 @@ if (-not $DryRun) {
         "C:\langpacks"
     ) | ForEach-Object {
         if (Test-Path $_) {
+            $script:manifest.changes.folders_deleted.Add($_) | Out-Null
             takeown /F $_ /R /A /D Y 2>$null | Out-Null
             icacls $_ /grant Administrators:F /T /C /Q 2>$null | Out-Null
             Remove-Item $_ -Recurse -Force -EA 0
@@ -1919,6 +1932,7 @@ if (-not $DryRun) {
     # Delete Dell Start Menu folder
     $dellStartMenu = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Dell"
     if (Test-Path $dellStartMenu) {
+        $script:manifest.changes.folders_deleted.Add($dellStartMenu) | Out-Null
         Remove-Item $dellStartMenu -Recurse -Force -EA 0
     }
 
@@ -1931,7 +1945,7 @@ if (-not $DryRun) {
         "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\MSI",
         "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Razer"
     ) | ForEach-Object {
-        if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+        if (Test-Path $_) { $script:manifest.changes.folders_deleted.Add($_) | Out-Null; Remove-Item $_ -Recurse -Force -EA 0 }
     }
 
     # Clear Accessibility shortcuts (common location)
@@ -1994,6 +2008,7 @@ if (-not $DryRun) {
         "$env:LOCALAPPDATA\Razer"
     ) | ForEach-Object {
         if (Test-Path $_) {
+            $script:manifest.changes.folders_deleted.Add($_) | Out-Null
             Remove-Item $_ -Recurse -Force -EA 0
         }
     }
@@ -2025,11 +2040,15 @@ if (-not $DryRun) {
     # Delete OEM services (preserving Intel chipset/driver services)
     Write-Log "  Nuking OEM services..." "INFO"
     Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
+        $script:manifest.changes.services_deleted.Add($_.Name) | Out-Null
         Stop-Service -Name $_.Name -Force -EA 0
         sc.exe delete $_.Name 2>$null
     }
 
     # Disable WavesSvc64 specifically
+    if (Get-Service -Name 'WavesSvc64' -EA 0) {
+        $script:manifest.changes.services_deleted.Add('WavesSvc64') | Out-Null
+    }
     Stop-Service -Name 'WavesSvc64' -Force -EA 0
     Set-Service -Name 'WavesSvc64' -StartupType Disabled -EA 0
     sc.exe delete 'WavesSvc64' 2>$null
@@ -2158,7 +2177,10 @@ if (-not $DryRun) {
         'HKLM:\SOFTWARE\Razer',
         'HKLM:\SOFTWARE\WOW6432Node\Razer'
     ) | ForEach-Object {
-        if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+        if (Test-Path $_) {
+            $script:manifest.changes.registry_deleted.Add($_) | Out-Null
+            Remove-Item $_ -Recurse -Force -EA 0
+        }
     }
 
     # Delete OEM Add/Remove Programs entries
@@ -2380,6 +2402,9 @@ if (-not (Test-PhaseEnabled 'Office')) {
             # Stop and delete Office services
             Write-Log "  Nuking Office services..." "INFO"
             @('ClickToRunSvc','OfficeSvc','ose','ose64','osppsvc') | ForEach-Object {
+                if (Get-Service -Name $_ -EA 0) {
+                    $script:manifest.changes.services_deleted.Add($_) | Out-Null
+                }
                 Stop-Service -Name $_ -Force -EA 0
                 Set-Service -Name $_ -StartupType Disabled -EA 0
                 sc.exe delete $_ 2>$null
