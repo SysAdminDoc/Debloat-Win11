@@ -1293,20 +1293,8 @@ if (-not $KeepDefender) {
         Write-Log "  WARNING: Tamper Protection is enabled -- exclusions may be silently rejected" "WARNING"
     }
 
-    # Allow config file to override Defender exclusions
-    $defenderExclusions = if ($script:configOverrides.ContainsKey('DefenderExclusions')) { $script:configOverrides.DefenderExclusions } else { @(
-        "C:\images",
-        "C:\MTU",
-        "C:\Maven",
-        "C:\Program Files\Voyance",
-        "C:\Program Files\VPACS",
-        "C:\Program Files\Minipacs",
-        "C:\ProgramData\Voyance",
-        "C:\ProgramData\VPACS",
-        "C:\ProgramData\Minipacs",
-        "C:\drtech",
-        "C:\ecali1"
-    ) }
+    # Allow config file to override Defender exclusions (empty by default; use -ConfigPath for vendor-specific paths)
+    $defenderExclusions = if ($script:configOverrides.ContainsKey('DefenderExclusions')) { $script:configOverrides.DefenderExclusions } else { @() }
 
     if (-not $DryRun) {
         foreach ($path in $defenderExclusions) {
@@ -2839,12 +2827,10 @@ if (-not $DryRun) {
                     }
                     Get-MaxBookmarkId $content.roots.bookmark_bar
 
-                    # Maven bookmarks to add
-                    $mavenBookmarks = @(
-                        @{ name = "Support"; url = "https://www.mavenimaging.com/support" }
-                        @{ name = "Patient Image"; url = "https://app.patientimage.ai/login" }
+                    # Bookmarks to add (use -ConfigPath for vendor-specific bookmarks)
+                    $edgeBookmarks = if ($script:configOverrides.ContainsKey('EdgeBookmarks')) { $script:configOverrides.EdgeBookmarks } else { @(
                         @{ name = "Google"; url = "https://www.google.com" }
-                    )
+                    ) }
 
                     # Get existing URLs
                     $existingUrls = @{}
@@ -2855,7 +2841,7 @@ if (-not $DryRun) {
                     # Add new bookmarks
                     $timestamp = [math]::Floor((Get-Date -UFormat %s)) * 1000000
                     $newBookmarks = @()
-                    foreach ($bm in $mavenBookmarks) {
+                    foreach ($bm in $edgeBookmarks) {
                         $normalizedUrl = $bm.url.TrimEnd('/').ToLower()
                         if (-not $existingUrls.ContainsKey($normalizedUrl)) {
                             $script:maxId++
@@ -2892,14 +2878,14 @@ Write-Log "  Edge configured" "SUCCESS"
 # ============================================================================
 Update-Phase "Firewall Rules"
 if (Test-PhaseEnabled 'Firewall') {
-Write-Log "[Phase 6/7] Importing Maven firewall rules..." "SECTION"
+Write-Log "[Phase 6/7] Importing firewall rules..." "SECTION"
 
 if (-not $DryRun) {
     # Enable firewall on all profiles
     Write-Log "  Enabling Windows Firewall..." "INFO"
     Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -EA 0
 
-    # Firewall rules CSV data
+    # Default: File and Printer Sharing rules only. Use -ConfigPath for vendor-specific rules.
     $firewallCsv = @"
 Name	DisplayName	Direction	Action	Protocol	LocalPort	RemotePort	Program
 FPS-NB_Datagram-In-UDP	File and Printer Sharing (NB-Datagram-In)	Inbound	Allow	UDP	138	Any	System
@@ -2912,17 +2898,6 @@ FPS-NB_Session-Out-TCP	File and Printer Sharing (NB-Session-Out)	Outbound	Allow	
 FPS-NB_Datagram-Out-UDP	File and Printer Sharing (NB-Datagram-Out)	Outbound	Allow	UDP	Any	138	System
 FPS-LLMNR-In-UDP	File and Printer Sharing (LLMNR-UDP-In)	Inbound	Allow	UDP	5355	Any	System
 FPS-LLMNR-Out-UDP	File and Printer Sharing (LLMNR-UDP-Out)	Outbound	Allow	UDP	Any	5355	System
-minipacs-TCP-In	minipacs TCP Inbound	Inbound	Allow	TCP	Any	Any	C:\program files\vpacs\minipacs.exe
-minipacs-UDP-In	minipacs UDP Inbound	Inbound	Allow	UDP	Any	Any	C:\program files\vpacs\minipacs.exe
-minipacs-Out	minipacs Outbound	Outbound	Allow	Any	Any	Any	C:\program files\vpacs\minipacs.exe
-voyance-TCP-In	voyance TCP Inbound	Inbound	Allow	TCP	Any	Any	C:\program files\voyance\voyance.exe
-voyance-UDP-In	voyance UDP Inbound	Inbound	Allow	UDP	Any	Any	C:\program files\voyance\voyance.exe
-voyance-Out	voyance Outbound	Outbound	Allow	Any	Any	Any	C:\program files\voyance\voyance.exe
-DICOM-9001-In	DICOM Port 9001	Inbound	Allow	TCP	9001	Any	System
-TeamViewer-Main-Out	TeamViewer	Outbound	Allow	Any	Any	Any	C:\Program Files (x86)\TeamViewer\TeamViewer.exe
-TeamViewer-Service-Out	TeamViewer Service	Outbound	Allow	Any	Any	Any	C:\Program Files (x86)\TeamViewer\TeamViewer_Service.exe
-Chrome-Out	Google Chrome	Outbound	Allow	Any	Any	Any	C:\program files\google\chrome\application\chrome.exe
-Chrome-mDNS-In	Google Chrome mDNS	Inbound	Allow	UDP	5353	Any	C:\Program Files\Google\Chrome\Application\chrome.exe
 "@
 
     Write-Log "  Importing firewall rules..." "INFO"

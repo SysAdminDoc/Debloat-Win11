@@ -145,7 +145,7 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 - ✅ Copilot disabled
 - ✅ uBlock Origin installed
 - ✅ Google as default
-- ✅ Maven bookmarks added
+- ✅ Configurable bookmarks (via `-ConfigPath`)
 
 ---
 
@@ -1019,24 +1019,25 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "D
 
 ### Adding Defender Exclusions
 
-Edit `$defenderExclusions` array (around line 865):
+Add `DefenderExclusions` to your config file (default is empty):
 
 ```powershell
-$defenderExclusions = @(
+# In your .psd1 config file:
+DefenderExclusions = @(
     "C:\images",
-    "C:\Maven",
-    "C:\YourPath",  # Add your path
+    "C:\YourApp",
 )
 ```
 
 ### Adding Edge Bookmarks
 
-Edit `$mavenBookmarks` array (around line 1897):
+Add `EdgeBookmarks` to your config file:
 
 ```powershell
-$mavenBookmarks = @(
-    @{ name = "Support"; url = "https://www.mavenimaging.com/support" }
-    @{ name = "Your Site"; url = "https://your-site.com" }  # Add bookmark
+# In your .psd1 config file:
+EdgeBookmarks = @(
+    @{ name = "Google"; url = "https://www.google.com" }
+    @{ name = "Support"; url = "https://support.example.com" }
 )
 ```
 
@@ -1276,15 +1277,7 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 
 ## License
 
-This script is provided as-is for use by Maven Imaging and authorized partners. No warranty is provided. Test in non-production environment first.
-
----
-
-## Support
-
-**Maven Imaging Support:**
-- Web: https://www.mavenimaging.com/support
-- Portal: https://app.patientimage.ai/login
+This script is provided as-is. No warranty is provided. Test in a non-production environment first.
 
 ---
 
