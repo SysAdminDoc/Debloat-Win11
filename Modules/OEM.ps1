@@ -10,39 +10,32 @@ Write-Rationale 'OEM'
 # Intel chipset/driver services and processes that must NOT be killed
 $script:oemSafeIntelPattern = 'igfx|IntelAudio|Intel.*Driver|Intel.*Chipset|IntcDAud|IntcOED|IntelManagementEngine|imesrv|jhi_service|LMS'
 
+Write-Log "  Disabling OEM services..." "INFO"
+$oemServices = @(Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern })
+$script:counters.OEMCleaned += $oemServices.Count
 if (-not $DryRun) {
-    # Stop all OEM services and processes FIRST (ensures clean removal)
-    Write-Log "  Disabling OEM services..." "INFO"
-    Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
-        Stop-Service -Name $_.Name -Force -EA 0
-        Set-Service -Name $_.Name -StartupType Disabled -EA 0
-        $script:counters.OEMCleaned++
+    foreach ($svc in $oemServices) {
+        Stop-Service -Name $svc.Name -Force -EA 0
+        Set-Service -Name $svc.Name -StartupType Disabled -EA 0
     }
+
     Write-Log "  Killing OEM processes..." "INFO"
     Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Process -Id $_.Id -Force -EA 0
     }
+}
 
-    # AppX removal
-    Get-AppxPackage -AllUsers *Dell* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *DB6EA5DB* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *HONHAIPRECISION* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *Intel* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *AppUp* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *HPInc* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *Lenovo* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *Dolby* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *Realtek* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxPackage -AllUsers *Waves* 2>$null | Remove-AppxPackage -AllUsers 2>$null
-    Get-AppxProvisionedPackage -Online 2>$null | Where-Object { $_.DisplayName -match 'Dell|Intel|HP|Lenovo|Dolby|Realtek|Waves' } | Remove-AppxProvisionedPackage -Online 2>$null
+# AppX removal (routed through Remove-AppxDryRun for DryRun + manifest tracking)
+$oemAppxPatterns = @('*Dell*','*DB6EA5DB*','*HONHAIPRECISION*','*Intel*','*AppUp*','*HPInc*','*Lenovo*','*Dolby*','*Realtek*','*Waves*')
+foreach ($pattern in $oemAppxPatterns) {
+    Remove-AppxDryRun -Pattern $pattern
+}
+if (-not $DryRun) {
     Get-Package *Dell* 2>$null | Uninstall-Package -Force 2>$null
     Get-Package *Intel* 2>$null | Uninstall-Package -Force 2>$null
-
-    Write-Log "  OEM AppX packages removed" "SUCCESS"
-} else {
-    Write-Log "  [DRY RUN] Would remove OEM services, processes, and AppX packages" "INFO"
-    $script:counters.OEMCleaned += 5
 }
+
+Write-Log "  OEM AppX packages removed" "SUCCESS"
 
 # ============================================================================
 # PHASE 2B: OEM NUCLEAR CLEAN (Skip uninstallers, delete everything)

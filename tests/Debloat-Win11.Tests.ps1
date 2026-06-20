@@ -127,17 +127,22 @@ Describe 'Disable-ServiceDryRun' {
             param([string]$ServiceName)
             $svc = Get-Service -Name $ServiceName -EA 0
             if ($svc) {
-                $script:manifest.changes.services_disabled.Add($ServiceName) | Out-Null
+                $script:manifest.changes.services_disabled.Add(@{
+                    name = $ServiceName
+                    original_startup_type = $svc.StartType.ToString()
+                }) | Out-Null
                 $script:counters.ServicesDisabled++
             }
         }
     }
 
-    It 'records existing service in manifest' {
+    It 'records existing service in manifest with startup type' {
         Disable-ServiceDryRun -ServiceName 'WSearch'
         $wsearch = Get-Service -Name 'WSearch' -EA 0
         if ($wsearch) {
-            $script:manifest.changes.services_disabled | Should -Contain 'WSearch'
+            $entry = $script:manifest.changes.services_disabled | Where-Object { $_.name -eq 'WSearch' }
+            $entry | Should -Not -BeNullOrEmpty
+            $entry.original_startup_type | Should -Not -BeNullOrEmpty
         }
     }
 

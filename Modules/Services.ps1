@@ -76,9 +76,13 @@ if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $DryRun) {
         }
     } -ThrottleLimit 8
     # Record in manifest (must be sequential for thread-safe ArrayList)
-    foreach ($svc in $servicesToDisable) {
-        if (Get-Service -Name $svc -EA 0) {
-            $script:manifest.changes.services_disabled.Add($svc) | Out-Null
+    foreach ($svcName in $servicesToDisable) {
+        $svcObj = Get-Service -Name $svcName -EA 0
+        if ($svcObj) {
+            $script:manifest.changes.services_disabled.Add(@{
+                name = $svcName
+                original_startup_type = $svcObj.StartType.ToString()
+            }) | Out-Null
             $script:counters.ServicesDisabled++
         }
     }

@@ -16,12 +16,16 @@ jobs:
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -SkipPublisherCheck
-          $results = Invoke-ScriptAnalyzer -Path .\Debloat-Win11.ps1 -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost
-          if ($results) {
-            $results | Format-Table -AutoSize
-            throw "$($results.Count) PSScriptAnalyzer issues found"
+          $scripts = Get-ChildItem -Path . -Filter '*.ps1' -Recurse | Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' }
+          $allResults = @()
+          foreach ($script in $scripts) {
+            $allResults += Invoke-ScriptAnalyzer -Path $script.FullName -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost
           }
-          Write-Host "PSScriptAnalyzer: No issues found"
+          if ($allResults) {
+            $allResults | Format-Table -AutoSize
+            throw "$($allResults.Count) PSScriptAnalyzer issues found"
+          }
+          Write-Host "PSScriptAnalyzer: No issues found across $($scripts.Count) files"
 
       - name: Run Pester Tests
         shell: pwsh

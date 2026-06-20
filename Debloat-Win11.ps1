@@ -97,12 +97,14 @@ if ($UndoFile) {
     }
     Write-Host "  Registry entries restored: $undoneReg" -ForegroundColor Green
 
-    # Re-enable services
+    # Re-enable services (supports both old string-only and new object manifests)
     $undoneServices = 0
-    foreach ($svcName in $undoManifest.changes.services_disabled) {
+    foreach ($svcEntry in $undoManifest.changes.services_disabled) {
+        $svcName = if ($svcEntry -is [string]) { $svcEntry } else { $svcEntry.name }
+        $startType = if ($svcEntry -is [string] -or -not $svcEntry.original_startup_type) { 'Manual' } else { $svcEntry.original_startup_type }
         $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
         if ($svc) {
-            Set-Service -Name $svcName -StartupType Manual -ErrorAction SilentlyContinue
+            Set-Service -Name $svcName -StartupType $startType -ErrorAction SilentlyContinue
             Start-Service -Name $svcName -ErrorAction SilentlyContinue
             $undoneServices++
         }
@@ -213,10 +215,11 @@ if ($DiffManifests) {
     }
     if ($regDiffs -eq 0) { Write-Host "  Registry: identical" -ForegroundColor Gray }
 
-    # Compare services
-    $svcA = @($m1.changes.services_disabled); $svcB = @($m2.changes.services_disabled)
-    $svcOnlyA = $svcA | Where-Object { $svcB -notcontains $_ }
-    $svcOnlyB = $svcB | Where-Object { $svcA -notcontains $_ }
+    # Compare services (handle both string-only and object manifest formats)
+    $svcNamesA = @($m1.changes.services_disabled | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.name } })
+    $svcNamesB = @($m2.changes.services_disabled | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.name } })
+    $svcOnlyA = $svcNamesA | Where-Object { $svcNamesB -notcontains $_ }
+    $svcOnlyB = $svcNamesB | Where-Object { $svcNamesA -notcontains $_ }
     if ($svcOnlyA) { $svcOnlyA | ForEach-Object { Write-Host "  - SVC (A only): $_" -ForegroundColor Red } }
     if ($svcOnlyB) { $svcOnlyB | ForEach-Object { Write-Host "  + SVC (B only): $_" -ForegroundColor Green } }
     if (-not $svcOnlyA -and -not $svcOnlyB) { Write-Host "  Services: identical" -ForegroundColor Gray }
@@ -241,6 +244,115 @@ if ($DiffManifests) {
     Write-Host "=== DIFF COMPLETE ===" -ForegroundColor Yellow
     exit 0
 }
+
+# ============================================================================
+# CANONICAL APPX REMOVE PATTERNS (shared between live mode and WIM mode)
+# ============================================================================
+$script:defaultRemovePatterns = @(
+    '*Clipchamp*',
+    '*Microsoft.3DBuilder*',
+    '*Microsoft.549981C3F5F10*',
+    '*Microsoft.BingFinance*',
+    '*Microsoft.BingNews*',
+    '*Microsoft.BingSports*',
+    '*Microsoft.BingWeather*',
+    '*Microsoft.BingSearch*',
+    '*Microsoft.Copilot*',
+    '*Microsoft.GamingApp*',
+    '*Microsoft.GetHelp*',
+    '*Microsoft.Getstarted*',
+    '*Microsoft.Messaging*',
+    '*Microsoft.Microsoft3DViewer*',
+    '*Microsoft.MicrosoftOfficeHub*',
+    '*Microsoft.MicrosoftSolitaireCollection*',
+    '*Microsoft.MixedReality*',
+    '*Microsoft.Office.OneNote*',
+    '*Microsoft.OneConnect*',
+    '*Microsoft.OutlookForWindows*',
+    '*Microsoft.People*',
+    '*Microsoft.PowerAutomateDesktop*',
+    '*Microsoft.Print3D*',
+    '*Microsoft.SkypeApp*',
+    '*Microsoft.Todos*',
+    '*Microsoft.Wallet*',
+    '*Microsoft.Windows.DevHome*',
+    '*Microsoft.WindowsCamera*',
+    '*Microsoft.windowscommunicationsapps*',
+    '*Microsoft.WindowsFeedbackHub*',
+    '*Microsoft.WindowsMaps*',
+    '*Microsoft.Xbox*',
+    '*Microsoft.XboxApp*',
+    '*Microsoft.XboxGameOverlay*',
+    '*Microsoft.XboxGamingOverlay*',
+    '*Microsoft.XboxIdentityProvider*',
+    '*Microsoft.XboxSpeechToTextOverlay*',
+    '*Microsoft.Xbox.TCUI*',
+    '*Microsoft.GamingServices*',
+    '*Microsoft.YourPhone*',
+    '*Microsoft.ZuneMusic*',
+    '*Microsoft.ZuneVideo*',
+    '*Microsoft.Edge.GameAssist*',
+    '*Microsoft.WidgetsPlatformRuntime*',
+    '*MicrosoftCorporationII.MicrosoftFamily*',
+    '*MicrosoftWindows.Client.WebExperience*',
+    '*MicrosoftWindows.CrossDevice*',
+    '*MicrosoftTeams*',
+    '*MSTeams*',
+    '*Disney*',
+    '*Spotify*',
+    '*Facebook*',
+    '*Instagram*',
+    '*TikTok*',
+    '*Netflix*',
+    '*Amazon*',
+    '*Twitter*',
+    '*LinkedInforWindows*',
+    '*CandyCrush*',
+    '*BubbleWitch*',
+    '*FarmVille*',
+    '*RoyalRevolt*',
+    '*Sway*',
+    '*MicrosoftCorporationII.Windows.RemoteDesktop*',
+    '*Microsoft.RemoteDesktop*',
+    '*AppUp.Intel*',
+    '*Intel*GraphicsExperience*',
+    '*Intel*Optane*',
+    '*Intel*ManagementandSecurity*',
+    '*HPInc*',
+    '*HPPrinterControl*',
+    '*HPPrivacySettings*',
+    '*HPSupportAssistant*',
+    '*HPSystemEventUtility*',
+    '*LenovoCompanion*',
+    '*LenovoCorporation*',
+    '*LenovoUtility*',
+    '*RealtekAudio*',
+    '*RealtekSemiconductor*',
+    '*DolbyLaboratories*',
+    '*WavesAudio*',
+    '*ASUS*',
+    '*ASUSPCAssistant*',
+    '*ArmouryCrate*',
+    '*MyASUS*',
+    '*ROGLiveService*',
+    '*Acer*',
+    '*AcerCare*',
+    '*AcerCollection*',
+    '*AcerIncorporated*',
+    '*AcerQuickAccess*',
+    '*MSI*',
+    '*MysticLight*',
+    '*DragonCenter*',
+    '*MSIAfterburner*',
+    '*Razer*',
+    '*RazerInc*',
+    '*RazerCortex*',
+    '*RazerSynapse*',
+    '*Microsoft.PCManager*',
+    '*Microsoft.Windows.AIHub*',
+    '*Microsoft.M365Companions*',
+    '*Microsoft.StartExperiencesApp*'
+)
 
 # ============================================================================
 # WIM IMAGE MODE - Offline debloat of a mounted Windows image
@@ -268,18 +380,7 @@ if ($WimPath) {
     # Remove provisioned AppX packages from the offline image
     Write-Host "`n  Removing provisioned AppX packages..." -ForegroundColor Gray
     $provPkgs = Get-AppxProvisionedPackage -Path $MountDir -EA 0
-    $removePatterns = @(
-        '*Clipchamp*', '*Microsoft.BingNews*', '*Microsoft.BingSports*', '*Microsoft.BingWeather*',
-        '*Microsoft.BingSearch*', '*Microsoft.Copilot*', '*Microsoft.GamingApp*', '*Microsoft.GetHelp*',
-        '*Microsoft.Getstarted*', '*Microsoft.MicrosoftSolitaireCollection*', '*Microsoft.People*',
-        '*Microsoft.WindowsFeedbackHub*', '*Microsoft.ZuneMusic*', '*Microsoft.ZuneVideo*',
-        '*Microsoft.Xbox*', '*Microsoft.YourPhone*', '*Microsoft.WindowsMaps*', '*Microsoft.Todos*',
-        '*Microsoft.OutlookForWindows*', '*Microsoft.PCManager*', '*Microsoft.Windows.AIHub*',
-        '*Microsoft.M365Companions*', '*Microsoft.WidgetsPlatformRuntime*',
-        '*MicrosoftWindows.Client.WebExperience*', '*MicrosoftWindows.CrossDevice*',
-        '*Disney*', '*Spotify*', '*Facebook*', '*TikTok*', '*Netflix*', '*Amazon*',
-        '*CandyCrush*', '*BubbleWitch*'
-    )
+    $removePatterns = $script:defaultRemovePatterns
     $removed = 0
     foreach ($pkg in $provPkgs) {
         foreach ($pattern in $removePatterns) {
@@ -554,7 +655,10 @@ function Disable-ServiceDryRun {
     param([string]$ServiceName)
     $svc = Get-Service -Name $ServiceName -EA 0
     if ($svc) {
-        $script:manifest.changes.services_disabled.Add($ServiceName) | Out-Null
+        $script:manifest.changes.services_disabled.Add(@{
+            name = $ServiceName
+            original_startup_type = $svc.StartType.ToString()
+        }) | Out-Null
         $script:counters.ServicesDisabled++
         if (-not $DryRun) {
             Stop-Service -Name $ServiceName -Force -EA 0
@@ -1146,7 +1250,11 @@ try {
     $regRows = ($script:manifest.changes.registry_set | ForEach-Object {
         "<tr><td>$($_.path)</td><td>$($_.name)</td><td>$($_.old_value)</td><td>$($_.new_value)</td></tr>"
     }) -join "`n"
-    $svcRows = ($script:manifest.changes.services_disabled | ForEach-Object { "<tr><td>$_</td><td>Disabled</td></tr>" }) -join "`n"
+    $svcRows = ($script:manifest.changes.services_disabled | ForEach-Object {
+        $sName = if ($_ -is [string]) { $_ } else { $_.name }
+        $sOrig = if ($_ -is [string]) { 'Unknown' } else { $_.original_startup_type }
+        "<tr><td>$sName</td><td>Disabled (was $sOrig)</td></tr>"
+    }) -join "`n"
     $appRows = ($script:manifest.changes.appx_removed | ForEach-Object { "<tr><td>$_</td></tr>" }) -join "`n"
     $taskRows = ($script:manifest.changes.tasks_disabled | ForEach-Object { "<tr><td>$_</td><td>Disabled</td></tr>" }) -join "`n"
 
