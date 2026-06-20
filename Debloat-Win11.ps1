@@ -18,7 +18,9 @@ param(
     [string[]]$Only,
     [string[]]$Skip,
     [switch]$Silent,
-    [switch]$Explain
+    [switch]$Explain,
+    [string]$RestoreApp,
+    [string[]]$DiffManifests
 )
 
 # ============================================================================
@@ -129,6 +131,111 @@ if ($UndoFile) {
     Write-Host ""
     Write-Host "=== UNDO COMPLETE ===" -ForegroundColor Green
     Write-Host "Restart recommended to apply all restored settings." -ForegroundColor Yellow
+    exit 0
+}
+
+# ============================================================================
+# RESTORE APP MODE - Reinstall a removed AppX package via winget
+# ============================================================================
+if ($RestoreApp) {
+    $wingetCmd = Get-Command 'winget' -EA 0
+    if (-not $wingetCmd) {
+        Write-Host "ERROR: winget is not installed. Use the Microsoft Store to reinstall apps manually." -ForegroundColor Red
+        exit 2
+    }
+
+    Write-Host "=== RESTORE APP MODE ===" -ForegroundColor Yellow
+    Write-Host "Searching for: $RestoreApp" -ForegroundColor Cyan
+
+    $searchResult = & winget search $RestoreApp --accept-source-agreements 2>&1
+    Write-Host $($searchResult | Out-String)
+
+    Write-Host ""
+    Write-Host "Installing: $RestoreApp" -ForegroundColor Cyan
+    & winget install $RestoreApp --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object { Write-Host $_ }
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "=== RESTORE COMPLETE ===" -ForegroundColor Green
+        exit 0
+    } else {
+        Write-Host ""
+        Write-Host "=== RESTORE FAILED (exit code $LASTEXITCODE) ===" -ForegroundColor Red
+        Write-Host "Try the Microsoft Store or run: winget install --id <exact-id>" -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+# ============================================================================
+# DIFF MANIFESTS MODE - Compare two undo manifests
+# ============================================================================
+if ($DiffManifests) {
+    if ($DiffManifests.Count -ne 2) {
+        Write-Host "ERROR: -DiffManifests requires exactly 2 manifest paths" -ForegroundColor Red
+        exit 2
+    }
+    foreach ($mf in $DiffManifests) {
+        if (!(Test-Path $mf)) {
+            Write-Host "ERROR: Manifest not found: $mf" -ForegroundColor Red
+            exit 2
+        }
+    }
+
+    $m1 = Get-Content $DiffManifests[0] -Raw | ConvertFrom-Json
+    $m2 = Get-Content $DiffManifests[1] -Raw | ConvertFrom-Json
+
+    Write-Host "=== MANIFEST DIFF ===" -ForegroundColor Yellow
+    Write-Host "  A: $($m1.timestamp) ($($DiffManifests[0] | Split-Path -Leaf))" -ForegroundColor Cyan
+    Write-Host "  B: $($m2.timestamp) ($($DiffManifests[1] | Split-Path -Leaf))" -ForegroundColor Cyan
+    Write-Host ""
+
+    # Compare registry changes
+    $regA = @{}; $m1.changes.registry_set | ForEach-Object { $regA["$($_.path)\$($_.name)"] = $_.new_value }
+    $regB = @{}; $m2.changes.registry_set | ForEach-Object { $regB["$($_.path)\$($_.name)"] = $_.new_value }
+
+    $allKeys = ($regA.Keys + $regB.Keys) | Sort-Object -Unique
+    $regDiffs = 0
+    foreach ($key in $allKeys) {
+        $inA = $regA.ContainsKey($key); $inB = $regB.ContainsKey($key)
+        if ($inA -and -not $inB) {
+            Write-Host "  - REG (A only): $key = $($regA[$key])" -ForegroundColor Red
+            $regDiffs++
+        } elseif (-not $inA -and $inB) {
+            Write-Host "  + REG (B only): $key = $($regB[$key])" -ForegroundColor Green
+            $regDiffs++
+        } elseif ($regA[$key] -ne $regB[$key]) {
+            Write-Host "  ~ REG (changed): $key  A=$($regA[$key]) -> B=$($regB[$key])" -ForegroundColor Yellow
+            $regDiffs++
+        }
+    }
+    if ($regDiffs -eq 0) { Write-Host "  Registry: identical" -ForegroundColor Gray }
+
+    # Compare services
+    $svcA = @($m1.changes.services_disabled); $svcB = @($m2.changes.services_disabled)
+    $svcOnlyA = $svcA | Where-Object { $svcB -notcontains $_ }
+    $svcOnlyB = $svcB | Where-Object { $svcA -notcontains $_ }
+    if ($svcOnlyA) { $svcOnlyA | ForEach-Object { Write-Host "  - SVC (A only): $_" -ForegroundColor Red } }
+    if ($svcOnlyB) { $svcOnlyB | ForEach-Object { Write-Host "  + SVC (B only): $_" -ForegroundColor Green } }
+    if (-not $svcOnlyA -and -not $svcOnlyB) { Write-Host "  Services: identical" -ForegroundColor Gray }
+
+    # Compare AppX
+    $appA = @($m1.changes.appx_removed); $appB = @($m2.changes.appx_removed)
+    $appOnlyA = $appA | Where-Object { $appB -notcontains $_ }
+    $appOnlyB = $appB | Where-Object { $appA -notcontains $_ }
+    if ($appOnlyA) { $appOnlyA | ForEach-Object { Write-Host "  - APP (A only): $_" -ForegroundColor Red } }
+    if ($appOnlyB) { $appOnlyB | ForEach-Object { Write-Host "  + APP (B only): $_" -ForegroundColor Green } }
+    if (-not $appOnlyA -and -not $appOnlyB) { Write-Host "  AppX: identical" -ForegroundColor Gray }
+
+    # Compare tasks
+    $taskA = @($m1.changes.tasks_disabled); $taskB = @($m2.changes.tasks_disabled)
+    $taskOnlyA = $taskA | Where-Object { $taskB -notcontains $_ }
+    $taskOnlyB = $taskB | Where-Object { $taskA -notcontains $_ }
+    if ($taskOnlyA) { $taskOnlyA | ForEach-Object { Write-Host "  - TASK (A only): $_" -ForegroundColor Red } }
+    if ($taskOnlyB) { $taskOnlyB | ForEach-Object { Write-Host "  + TASK (B only): $_" -ForegroundColor Green } }
+    if (-not $taskOnlyA -and -not $taskOnlyB) { Write-Host "  Tasks: identical" -ForegroundColor Gray }
+
+    Write-Host ""
+    Write-Host "=== DIFF COMPLETE ===" -ForegroundColor Yellow
     exit 0
 }
 
@@ -922,10 +1029,12 @@ if (-not $DryRun) {
     Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}" -Recurse -EA 0
 }
 
-# OOBE & Nag Screens
+# OOBE & Nag Screens (fresh-OOBE mode: fully suppress setup/privacy prompts)
 Write-Log "  Disabling OOBE & nag screens..." "INFO"
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OOBE" -Name "DisablePrivacyExperience" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" -Name "DisablePrivacyExperience" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" -Name "SkipMachineOOBE" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" -Name "SkipUserOOBE" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableFirstLogonAnimation" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement" -Name "ScoobeSystemSettingEnabled" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\SystemSettings\AccountNotifications" -Name "EnableAccountNotifications" -Value 0
@@ -1641,6 +1750,17 @@ if (-not $DryRun) {
             # Input personalization
             reg add "$hiveName\SOFTWARE\Microsoft\InputPersonalization" /v RestrictImplicitTextCollection /t REG_DWORD /d 1 /f 2>$null
             reg add "$hiveName\SOFTWARE\Microsoft\InputPersonalization" /v RestrictImplicitInkCollection /t REG_DWORD /d 1 /f 2>$null
+
+            # OOBE: suppress privacy/setup prompts for new user profiles
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement" /v ScoobeSystemSettingEnabled /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-310093Enabled /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SubscribedContent-338389Enabled /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v ContentDeliveryAllowed /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v OemPreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v PreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v FeatureManagementEnabled /t REG_DWORD /d 0 /f 2>$null
+            reg add "$hiveName\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null
 
             [gc]::Collect()
             Start-Sleep -Milliseconds 500
@@ -3164,6 +3284,37 @@ Write-Log "Exit code: $script:exitCode" "INFO"
 $summaryMsg = "Debloat-Win11 v2.0.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
+
+# Collect crash dump if errors occurred (opt-in diagnostic bundle)
+if ($script:exitCode -ne 0) {
+    $crashTs = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $crashDir = "$env:TEMP\Debloat-Win11-crash-$crashTs"
+    $crashZip = "$env:TEMP\Debloat-Win11-crash-$crashTs.zip"
+    try {
+        New-Item -Path $crashDir -ItemType Directory -Force | Out-Null
+        if (Test-Path $logFile) { Copy-Item $logFile $crashDir -EA 0 }
+        if (Test-Path $manifestFile) { Copy-Item $manifestFile $crashDir -EA 0 }
+        $sysInfo = @{
+            ComputerName = $env:COMPUTERNAME
+            OSName       = $osName
+            Build        = $osBuild
+            EditionId    = $editionId
+            IsLTSC       = $script:isLTSC
+            IsLaptop     = $script:isLaptop
+            IsSSD        = $script:isSSD
+            RAM_GB       = $totalRAM
+            ExitCode     = $script:exitCode
+            Timestamp    = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
+        }
+        $sysInfo | ConvertTo-Json | Set-Content "$crashDir\system-info.json" -EA 0
+        Compress-Archive -Path "$crashDir\*" -DestinationPath $crashZip -Force -EA 0
+        Remove-Item $crashDir -Recurse -Force -EA 0
+        Write-Log "Crash dump saved: $crashZip" "WARNING"
+        Write-Log "  Attach this file to bug reports -- it is never uploaded automatically." "INFO"
+    } catch {
+        Write-Log "Could not create crash dump" "WARNING"
+    }
+}
 
 Write-Host "`nRestart recommended to apply all changes." -ForegroundColor Yellow
 

@@ -1,0 +1,78 @@
+# Kiosk Preset - Single-app/locked-down display deployments
+# Removes all consumer apps, hides taskbar elements, disables user-facing features
+# Usage: .\Debloat-Win11.ps1 -ConfigPath .\presets\kiosk.psd1
+
+@{
+    RemovePatterns = @(
+        # Remove everything except Calculator, Notepad, Terminal, Photos, Settings, Store
+        '*Clipchamp*',
+        '*Microsoft.549981C3F5F10*',
+        '*Microsoft.3DBuilder*',
+        '*Microsoft.BingFinance*',
+        '*Microsoft.BingNews*',
+        '*Microsoft.BingSports*',
+        '*Microsoft.BingWeather*',
+        '*Microsoft.BingSearch*',
+        '*Microsoft.Copilot*',
+        '*Microsoft.GamingApp*',
+        '*Microsoft.GetHelp*',
+        '*Microsoft.Getstarted*',
+        '*Microsoft.Messaging*',
+        '*Microsoft.Microsoft3DViewer*',
+        '*Microsoft.MicrosoftOfficeHub*',
+        '*Microsoft.MicrosoftSolitaireCollection*',
+        '*Microsoft.MicrosoftStickyNotes*',
+        '*Microsoft.MixedReality*',
+        '*Microsoft.Office.OneNote*',
+        '*Microsoft.OneConnect*',
+        '*Microsoft.OutlookForWindows*',
+        '*Microsoft.People*',
+        '*Microsoft.PowerAutomateDesktop*',
+        '*Microsoft.Print3D*',
+        '*Microsoft.SkypeApp*',
+        '*Microsoft.Todos*',
+        '*Microsoft.Wallet*',
+        '*Microsoft.Windows.DevHome*',
+        '*Microsoft.WindowsAlarms*',
+        '*Microsoft.WindowsCamera*',
+        '*Microsoft.windowscommunicationsapps*',
+        '*Microsoft.WindowsFeedbackHub*',
+        '*Microsoft.WindowsMaps*',
+        '*Microsoft.WindowsSoundRecorder*',
+        '*Microsoft.Xbox*',
+        '*Microsoft.XboxApp*',
+        '*Microsoft.XboxGameOverlay*',
+        '*Microsoft.XboxGamingOverlay*',
+        '*Microsoft.XboxIdentityProvider*',
+        '*Microsoft.XboxSpeechToTextOverlay*',
+        '*Microsoft.Xbox.TCUI*',
+        '*Microsoft.GamingServices*',
+        '*Microsoft.YourPhone*',
+        '*Microsoft.ZuneMusic*',
+        '*Microsoft.ZuneVideo*',
+        '*Microsoft.Edge.GameAssist*',
+        '*Microsoft.WidgetsPlatformRuntime*',
+        '*MicrosoftCorporationII.MicrosoftFamily*',
+        '*MicrosoftCorporationII.QuickAssist*',
+        '*MicrosoftWindows.Client.WebExperience*',
+        '*MicrosoftWindows.CrossDevice*',
+        '*MicrosoftTeams*',
+        '*MSTeams*',
+        '*Microsoft.PCManager*',
+        '*Microsoft.Windows.AIHub*',
+        '*Microsoft.M365Companions*',
+        '*Microsoft.StartExperiencesApp*',
+        '*Disney*', '*Spotify*', '*Facebook*', '*Instagram*',
+        '*TikTok*', '*Netflix*', '*Amazon*', '*Twitter*',
+        '*LinkedInforWindows*', '*CandyCrush*', '*BubbleWitch*',
+        '*FarmVille*', '*RoyalRevolt*', '*Sway*',
+        '*AppUp.Intel*', '*Intel*GraphicsExperience*',
+        '*HPInc*', '*LenovoCompanion*', '*LenovoCorporation*',
+        '*DolbyLaboratories*', '*WavesAudio*', '*RealtekAudio*',
+        '*ASUS*', '*Acer*', '*MSI*', '*Razer*'
+    )
+
+    DefenderExclusions = @()
+
+    EdgeBookmarks = @()
+}
