@@ -1,6 +1,15 @@
 BeforeAll {
     $scriptPath = Join-Path $PSScriptRoot '..' 'Debloat-Win11.ps1'
     $scriptContent = Get-Content $scriptPath -Raw
+
+    # Also read all dot-sourced module files so content checks cover the full codebase
+    $modulesDir = Join-Path $PSScriptRoot '..' 'Modules'
+    $allContent = $scriptContent
+    if (Test-Path $modulesDir) {
+        Get-ChildItem $modulesDir -Filter '*.ps1' | ForEach-Object {
+            $allContent += "`n" + (Get-Content $_.FullName -Raw)
+        }
+    }
 }
 
 Describe 'Script Structure' {
@@ -141,7 +150,7 @@ Describe 'Disable-ServiceDryRun' {
 
 Describe 'DryRun Guards' {
     It 'has at least 10 DryRun guard blocks covering destructive phases' {
-        $dryRunGuards = ([regex]::Matches($scriptContent, 'if\s*\(\s*-not\s+\$DryRun\s*\)')).Count
+        $dryRunGuards = ([regex]::Matches($allContent, 'if\s*\(\s*-not\s+\$DryRun\s*\)')).Count
         $dryRunGuards | Should -BeGreaterOrEqual 10
     }
 
@@ -171,7 +180,7 @@ Describe 'No Duplicate ContentDeliveryManager Writes' {
         )
 
         foreach ($key in $cdmKeys) {
-            $count = ([regex]::Matches($scriptContent, [regex]::Escape($key))).Count
+            $count = ([regex]::Matches($allContent, [regex]::Escape($key))).Count
             $count | Should -BeLessOrEqual 2 -Because "$key should appear at most twice (HKCU Set-Reg + Default user reg add)"
         }
     }
@@ -190,14 +199,14 @@ Describe 'Version Consistency' {
 
 Describe 'Intel Driver Safeguard' {
     It 'defines oemSafeIntelPattern before OEM cleanup' {
-        $scriptContent | Should -Match 'oemSafeIntelPattern\s*='
+        $allContent | Should -Match 'oemSafeIntelPattern\s*='
     }
 
     It 'applies Intel exclusion to all OEM service/process patterns' {
-        $oemBlocks = [regex]::Matches($scriptContent, "Get-(Service|Process).*'dell\|intel")
+        $oemBlocks = [regex]::Matches($allContent, "Get-(Service|Process).*'dell\|intel")
         foreach ($block in $oemBlocks) {
-            $lineNum = ($scriptContent.Substring(0, $block.Index) -split "`n").Count
-            $line = ($scriptContent -split "`n")[$lineNum - 1]
+            $lineNum = ($allContent.Substring(0, $block.Index) -split "`n").Count
+            $line = ($allContent -split "`n")[$lineNum - 1]
             $line | Should -Match 'oemSafeIntelPattern' -Because "OEM match at line $lineNum should exclude Intel drivers"
         }
     }
@@ -231,18 +240,18 @@ Describe 'EventLog Integration' {
 
 Describe 'Config Override Mechanism' {
     It 'checks configOverrides for RemovePatterns' {
-        $scriptContent | Should -Match "configOverrides\.ContainsKey\('RemovePatterns'\)"
+        $allContent | Should -Match "configOverrides\.ContainsKey\('RemovePatterns'\)"
     }
 
     It 'checks configOverrides for ServicesToDisable' {
-        $scriptContent | Should -Match "configOverrides\.ContainsKey\('ServicesToDisable'\)"
+        $allContent | Should -Match "configOverrides\.ContainsKey\('ServicesToDisable'\)"
     }
 
     It 'checks configOverrides for DefenderExclusions' {
-        $scriptContent | Should -Match "configOverrides\.ContainsKey\('DefenderExclusions'\)"
+        $allContent | Should -Match "configOverrides\.ContainsKey\('DefenderExclusions'\)"
     }
 
     It 'checks configOverrides for EdgeBookmarks' {
-        $scriptContent | Should -Match "configOverrides\.ContainsKey\('EdgeBookmarks'\)"
+        $allContent | Should -Match "configOverrides\.ContainsKey\('EdgeBookmarks'\)"
     }
 }
