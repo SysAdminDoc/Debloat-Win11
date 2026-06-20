@@ -3,7 +3,7 @@
 # Phase 1: Remove bloatware AppX packages (user + provisioned)
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-Write-Log "[Phase 1/7] Removing bloatware packages..." "SECTION"
+Write-Log "[AppX] Removing bloatware packages..." "SECTION"
 Write-Rationale 'AppX'
 if ($script:isLTSC) {
     Write-Log "  LTSC edition: most consumer AppX packages are not present -- removals will be no-ops" "INFO"

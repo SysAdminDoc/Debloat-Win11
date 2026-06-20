@@ -4,7 +4,7 @@
 # Includes nuclear clean, bloat scheduled tasks, OEM registry
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-Write-Log "[Phase 2/7] Removing OEM bloatware..." "SECTION"
+Write-Log "[OEM] Removing OEM bloatware..." "SECTION"
 Write-Rationale 'OEM'
 
 # Intel chipset/driver services and processes that must NOT be killed
@@ -40,7 +40,7 @@ Write-Log "  OEM AppX packages removed" "SUCCESS"
 # ============================================================================
 # PHASE 2B: OEM NUCLEAR CLEAN (Skip uninstallers, delete everything)
 # ============================================================================
-Write-Log "[Phase 2/7] OEM Nuclear Clean..." "SECTION"
+Write-Log "[OEM] OEM Nuclear Clean..." "SECTION"
 
 if (-not $DryRun) {
     # Kill all OEM processes again (in case any respawned), preserving Intel drivers

@@ -3,7 +3,7 @@
 # Phase 4: Complete Office removal (when not in use)
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-    Write-Log "[Phase 4/7] Office Nuclear Removal..." "SECTION"
+    Write-Log "[Office] Office Nuclear Removal..." "SECTION"
     Write-Rationale 'Office'
 
     if (-not $DryRun) {

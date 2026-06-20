@@ -3,7 +3,7 @@
 # Phase 7: Clear browser caches, diagnostics, thumbnails, recent files, event logs
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-Write-Log "[Phase 7/7] Running privacy cleanup..." "SECTION"
+Write-Log "[Privacy] Running privacy cleanup..." "SECTION"
 Write-Rationale 'Privacy'
 
 if (-not $DryRun) {

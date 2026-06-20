@@ -3,7 +3,7 @@
 # Phase 3: OneDrive removal (when not in use)
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-    Write-Log "[Phase 3/7] Removing OneDrive..." "SECTION"
+    Write-Log "[OneDrive] Removing OneDrive..." "SECTION"
     Write-Rationale 'OneDrive'
 
     if (-not $DryRun) {

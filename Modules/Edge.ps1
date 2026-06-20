@@ -3,7 +3,7 @@
 # Phase 5: Edge Group Policy configuration, telemetry, Copilot, bookmarks
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-Write-Log "[Phase 5/7] Configuring Microsoft Edge..." "SECTION"
+Write-Log "[Edge] Configuring Microsoft Edge..." "SECTION"
 Write-Rationale 'Edge'
 
 # Close Edge first

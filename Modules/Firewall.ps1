@@ -3,7 +3,7 @@
 # Phase 6: Import firewall rules for file/printer sharing
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
-Write-Log "[Phase 6/7] Importing firewall rules..." "SECTION"
+Write-Log "[Firewall] Importing firewall rules..." "SECTION"
 Write-Rationale 'Firewall'
 
 # Default: File and Printer Sharing rules. Use -ConfigPath with FirewallRules key to override.

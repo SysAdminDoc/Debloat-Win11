@@ -23,7 +23,8 @@ param(
     [string[]]$DiffManifests,
     [string]$WimPath,
     [int]$WimIndex = 1,
-    [string]$MountDir = "C:\Debloat-WIM-Mount"
+    [string]$MountDir = "C:\Debloat-WIM-Mount",
+    [switch]$CheckDrift
 )
 
 # ============================================================================
@@ -36,6 +37,54 @@ if ($UndoFile -and $DryRun) {
 
 # Explain mode: forces DryRun + prints rationale for each planned change
 if ($Explain) { $DryRun = [switch]::new($true) }
+
+# ============================================================================
+# DRIFT DETECTION MODE - Report registry values that were reset by Windows Update
+# ============================================================================
+if ($CheckDrift) {
+    $driftChecks = @(
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Name = 'AllowTelemetry'; Expected = 0 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAIDataAnalysis'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'AllowRecallEnablement'; Expected = 0 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableClickToDo'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Name = 'DisableWindowsConsumerFeatures'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Dsh'; Name = 'AllowNewsAndInterests'; Expected = 0 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; Name = 'DisableWebSearch'; Expected = 1 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'SilentInstalledAppsEnabled'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'ContentDeliveryAllowed'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarDa'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_IrisRecommendations'; Expected = 0 }
+        @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement'; Name = 'ScoobeSystemSettingEnabled'; Expected = 0 }
+    )
+
+    Write-Host "=== DRIFT DETECTION ===" -ForegroundColor Yellow
+    $drifted = 0; $ok = 0; $missing = 0
+    foreach ($check in $driftChecks) {
+        $current = Get-ItemProperty -Path $check.Path -Name $check.Name -EA 0
+        if ($null -eq $current) {
+            Write-Host "  MISSING: $($check.Path)\$($check.Name) (expected $($check.Expected))" -ForegroundColor Red
+            $missing++
+        } elseif ($current.$($check.Name) -ne $check.Expected) {
+            Write-Host "  DRIFTED: $($check.Path)\$($check.Name) = $($current.$($check.Name)) (expected $($check.Expected))" -ForegroundColor Yellow
+            $drifted++
+        } else {
+            $ok++
+        }
+    }
+    Write-Host ""
+    Write-Host "  OK: $ok | Drifted: $drifted | Missing: $missing" -ForegroundColor $(if ($drifted + $missing -gt 0) { 'Yellow' } else { 'Green' })
+    if ($drifted + $missing -gt 0) {
+        Write-Host "  Re-run the script to re-apply drifted settings." -ForegroundColor Cyan
+    } else {
+        Write-Host "  All checked settings are intact." -ForegroundColor Green
+    }
+    Write-Host "=== DRIFT CHECK COMPLETE ===" -ForegroundColor Yellow
+    exit 0
+}
 
 $script:phaseRationale = @{
     SystemTweaks = "Disables telemetry, ads, and tracking. Applies UI preferences (dark mode, classic context menu). Configures Windows Update deferrals."
@@ -836,6 +885,28 @@ if ($tpStatus -and $tpStatus.IsTamperProtected) {
     Write-Log "  Tamper Protection: Disabled or not detected" "INFO"
 }
 
+# Report VBS/HVCI status
+$vbsStatus = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard -EA 0
+if ($vbsStatus) {
+    $vbsRunning = $vbsStatus.VirtualizationBasedSecurityStatus -eq 2
+    $hvciRunning = 1 -in @($vbsStatus.SecurityServicesRunning)
+    Write-Log "  VBS: $(if ($vbsRunning) { 'Running' } else { 'Not running' }) | HVCI: $(if ($hvciRunning) { 'Running' } else { 'Not running' })" "INFO"
+} else {
+    Write-Log "  VBS/HVCI: Status not available" "INFO"
+}
+
+# Check Smart App Control status (may block unsigned scripts)
+$sacPol = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -Name "VerifiedAndReputablePolicyState" -EA 0
+if ($sacPol -and $sacPol.VerifiedAndReputablePolicyState -eq 2) {
+    Write-Log "  Smart App Control: ENFORCEMENT MODE - unsigned scripts may be blocked" "WARNING"
+    Write-Log "  Run 'Unblock-File Debloat-Win11.ps1' if downloaded from the internet" "WARNING"
+}
+
+# Inform Enterprise/Education users about native RemoveDefaultMicrosoftStorePackages policy
+if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
+    Write-Log "  NOTE: Enterprise/Education 24H2+ supports native RemoveDefaultMicrosoftStorePackages policy via GPO/Intune" "INFO"
+}
+
 # ============================================================================
 # SSD DETECTION & OPTIMIZATION
 # ============================================================================
@@ -1100,7 +1171,7 @@ Update-Phase "AppX Package Removal"
 
 if (Test-PhaseEnabled 'AppX') {
 . "$PSScriptRoot\Modules\AppX.ps1"
-} else { Write-Log "[Phase 1/7] AppX removal SKIPPED (phase excluded)" "INFO" }
+} else { Write-Log "[AppX] AppX removal SKIPPED (phase excluded)" "INFO" }
 
 
 # ============================================================================
@@ -1110,7 +1181,7 @@ Update-Phase "OEM Cleanup"
 
 if (Test-PhaseEnabled 'OEM') {
 . "$PSScriptRoot\Modules\OEM.ps1"
-} else { Write-Log "[Phase 2/7] OEM cleanup SKIPPED (phase excluded)" "INFO" }
+} else { Write-Log "[OEM] OEM cleanup SKIPPED (phase excluded)" "INFO" }
 
 
 # ============================================================================
@@ -1119,9 +1190,9 @@ if (Test-PhaseEnabled 'OEM') {
 Update-Phase "OneDrive Removal"
 
 if (-not (Test-PhaseEnabled 'OneDrive')) {
-    Write-Log "[Phase 3/7] OneDrive SKIPPED (phase excluded)" "INFO"
+    Write-Log "[OneDrive] OneDrive SKIPPED (phase excluded)" "INFO"
 } elseif ($script:onedriveInUse) {
-    Write-Log "[Phase 3/7] OneDrive - SKIPPED (in use)" "SECTION"
+    Write-Log "[OneDrive] OneDrive - SKIPPED (in use)" "SECTION"
 } else {
 . "$PSScriptRoot\Modules\OneDrive.ps1"
 }
@@ -1133,9 +1204,9 @@ if (-not (Test-PhaseEnabled 'OneDrive')) {
 Update-Phase "Office Removal"
 
 if (-not (Test-PhaseEnabled 'Office')) {
-    Write-Log "[Phase 4/7] Office SKIPPED (phase excluded)" "INFO"
+    Write-Log "[Office] Office SKIPPED (phase excluded)" "INFO"
 } elseif ($script:officeInUse) {
-    Write-Log "[Phase 4/7] Office - SKIPPED (in use)" "SECTION"
+    Write-Log "[Office] Office - SKIPPED (in use)" "SECTION"
 } else {
 . "$PSScriptRoot\Modules\Office.ps1"
 }
@@ -1156,7 +1227,7 @@ Update-Phase "Edge Configuration"
 
 if (Test-PhaseEnabled 'Edge') {
 . "$PSScriptRoot\Modules\Edge.ps1"
-} else { Write-Log "[Phase 5/7] Edge SKIPPED (phase excluded)" "INFO" }
+} else { Write-Log "[Edge] Edge SKIPPED (phase excluded)" "INFO" }
 
 
 # ============================================================================
@@ -1166,7 +1237,7 @@ Update-Phase "Firewall Rules"
 
 if (Test-PhaseEnabled 'Firewall') {
 . "$PSScriptRoot\Modules\Firewall.ps1"
-} else { Write-Log "[Phase 6/7] Firewall SKIPPED (phase excluded)" "INFO" }
+} else { Write-Log "[Firewall] Firewall SKIPPED (phase excluded)" "INFO" }
 
 
 # ============================================================================
@@ -1176,7 +1247,7 @@ Update-Phase "Privacy Cleanup"
 
 if (Test-PhaseEnabled 'Privacy') {
 . "$PSScriptRoot\Modules\Privacy.ps1"
-} else { Write-Log "[Phase 7/7] Privacy SKIPPED (phase excluded)" "INFO" }
+} else { Write-Log "[Privacy] Privacy SKIPPED (phase excluded)" "INFO" }
 
 
 # ============================================================================
@@ -1266,6 +1337,52 @@ try {
     Write-Log "Undo manifest: $manifestFile" "INFO"
 } catch {
     Write-Log "Could not write undo manifest" "WARNING"
+}
+
+# ============================================================================
+# GENERATE STANDALONE REVERT SCRIPT
+# ============================================================================
+$revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps1"
+try {
+    $revertLines = [System.Collections.ArrayList]@()
+    $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.0.0") | Out-Null
+    $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
+    $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
+    $revertLines.Add('') | Out-Null
+
+    $regEntries = @($script:manifest.changes.registry_set)
+    [array]::Reverse($regEntries)
+    foreach ($entry in $regEntries) {
+        if ($null -eq $entry.old_value) {
+            $revertLines.Add("Remove-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Force -EA 0") | Out-Null
+        } else {
+            $type = if ($entry.type) { $entry.type } else { 'DWord' }
+            $revertLines.Add("if (!(Test-Path '$($entry.path)')) { New-Item -Path '$($entry.path)' -Force | Out-Null }") | Out-Null
+            $revertLines.Add("Set-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Value $($entry.old_value) -Type $type -Force -EA 0") | Out-Null
+        }
+    }
+    $revertLines.Add('') | Out-Null
+
+    foreach ($svcEntry in $script:manifest.changes.services_disabled) {
+        $sName = if ($svcEntry -is [string]) { $svcEntry } else { $svcEntry.name }
+        $sType = if ($svcEntry -is [string]) { 'Manual' } else { $svcEntry.original_startup_type }
+        $revertLines.Add("Set-Service -Name '$sName' -StartupType $sType -EA 0") | Out-Null
+        $revertLines.Add("Start-Service -Name '$sName' -EA 0") | Out-Null
+    }
+    $revertLines.Add('') | Out-Null
+
+    foreach ($taskName in $script:manifest.changes.tasks_disabled) {
+        $revertLines.Add("Get-ScheduledTask -TaskName '$taskName' -EA 0 | Enable-ScheduledTask -EA 0") | Out-Null
+    }
+    $revertLines.Add('') | Out-Null
+    $revertLines.Add('Write-Host "Revert complete. Restart recommended." -ForegroundColor Green') | Out-Null
+
+    $revertContent = $revertLines -join "`r`n"
+    [System.IO.File]::WriteAllText($revertFile, $revertContent, [System.Text.Encoding]::UTF8)
+    Write-Log "Revert script: $revertFile" "INFO"
+} catch {
+    Write-Log "Could not generate revert script" "WARNING"
 }
 
 # ============================================================================
