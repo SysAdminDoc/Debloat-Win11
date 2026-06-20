@@ -205,12 +205,25 @@ if (!(Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | 
 $logFile = "$LogDir\Debloat-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').log"
 $manifestFile = "$LogDir\Debloat-Manifest-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').json"
 
+# Register EventLog source for SIEM/compliance (idempotent)
+$script:eventLogSource = 'Debloat-Win11'
+if (-not [System.Diagnostics.EventLog]::SourceExists($script:eventLogSource)) {
+    try { New-EventLog -LogName 'Application' -Source $script:eventLogSource -EA Stop } catch {}
+}
+
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $prefix = if ($DryRun) { "[DRY RUN] " } else { "" }
     $logEntry = "[$timestamp] [$Level] $prefix$Message"
     Add-Content -Path $logFile -Value $logEntry -EA 0
+
+    # Write key events to Windows Event Log for SIEM forwarding
+    if ($Level -eq 'ERROR') {
+        Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 9001 -EntryType Error -Message "$prefix$Message" -EA 0
+    } elseif ($Level -eq 'SECTION') {
+        Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1001 -EntryType Information -Message "$prefix$Message" -EA 0
+    }
 
     if ($Silent) { if ($Level -eq 'ERROR') { $script:exitCode = 1 }; return }
 
@@ -3081,6 +3094,12 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Log "=== DEBLOAT COMPLETE ===" "INFO"
 Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.ServicesDisabled) | Tasks: $($script:counters.TasksDisabled) | Registry: $($script:counters.RegistryTweaks)" "INFO"
 Write-Log "Exit code: $script:exitCode" "INFO"
+
+# Write completion event to EventLog
+$summaryMsg = "Debloat-Win11 v2.0.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
+Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
+
 Write-Host "`nRestart recommended to apply all changes." -ForegroundColor Yellow
 
 exit $script:exitCode
