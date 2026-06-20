@@ -17,8 +17,7 @@ param(
     [string]$ConfigPath,
     [string[]]$Only,
     [string[]]$Skip,
-    [switch]$Silent,
-    [switch]$Explain
+    [switch]$Silent
 )
 
 # ============================================================================
@@ -699,18 +698,24 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\WindowsNotepad" -Name "DisableAIFeatures"
 Write-Host "  Disabling Windows 11 24H2/25H2 bloat..." -ForegroundColor Gray
 
 # --- Disable Windows Recall (AI screenshot feature) thoroughly ---
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAIDataAnalysis" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "TurnOffSavingSnapshots" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "TurnOffSavingSnapshots" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "AllowRecallEnablement" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "EnableRecall" -Value 0
-# Disable Recall optional feature if present
 if (-not $DryRun) {
     $recallFeature = Get-WindowsOptionalFeature -Online -FeatureName "Recall" -EA 0
     if ($recallFeature -and $recallFeature.State -eq 'Enabled') {
         Disable-WindowsOptionalFeature -Online -FeatureName "Recall" -NoRestart -EA 0 | Out-Null
     }
 }
+
+# --- 26H1+ AI feature controls (Click to Do, Settings Agent, Agent Workspaces) ---
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableClickToDo" -Value 1
+Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableClickToDo" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableSettingsAgent" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentConnectors" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentWorkspaces" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRemoteAgentConnectors" -Value 1
 
 # --- Disable Microsoft Copilot thoroughly (registry + AppX) ---
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
@@ -722,6 +727,10 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "HubsSidebarEnabled
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "CopilotCDPPageContext" -Value 0
 Remove-AppxDryRun -Pattern '*Microsoft.Copilot*'
 Remove-AppxDryRun -Pattern '*Microsoft.Windows.Ai.Copilot.Provider*'
+
+# --- Block M365 Copilot auto-start ---
+Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\M365Copilot" -Name "AutoStartDelayEnabled" -Value 0
+Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\M365Copilot" -Name "IsCompanionWindowAvailable" -Value 0
 
 # --- Block Windows Spotlight suggestions on desktop ---
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel" -Name "{2cc5ca98-6485-489a-8e0b-c62e1ebe953e}" -Value 1
@@ -769,6 +778,7 @@ Write-Host "  Disabling Bing Search..." -ForegroundColor Gray
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" -Name "BingSearchEnabled" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "DisableWebSearch" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer" -Name "DisableSearchBoxSuggestions" -Value 1
+Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings" -Name "IsDynamicSearchBoxEnabled" -Value 0
 
 # Disable Widgets
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
@@ -1850,7 +1860,13 @@ $removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { $
     '*Razer*',
     '*RazerInc*',
     '*RazerCortex*',
-    '*RazerSynapse*'
+    '*RazerSynapse*',
+    # 24H2+ / 26H1+ additions
+    '*Microsoft.PCManager*',
+    '*Microsoft.Windows.AIHub*',
+    '*Microsoft.M365Companions*',
+    '*Microsoft.StartExperiencesApp*',
+    '*Microsoft.OutlookForWindows*'
 ) }
 
 foreach ($pattern in $removePatterns) {
@@ -1897,16 +1913,19 @@ Update-Phase "OEM Cleanup"
 if (Test-PhaseEnabled 'OEM') {
 Write-Log "[Phase 2/7] Removing OEM bloatware..." "SECTION"
 
+# Intel chipset/driver services and processes that must NOT be killed
+$script:oemSafeIntelPattern = 'igfx|IntelAudio|Intel.*Driver|Intel.*Chipset|IntcDAud|IntcOED|IntelManagementEngine|imesrv|jhi_service|LMS'
+
 if (-not $DryRun) {
     # Stop all OEM services and processes FIRST (ensures clean removal)
     Write-Host "  Disabling OEM services..." -ForegroundColor Gray
-    Get-Service | Where-Object { $_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' } | ForEach-Object {
+    Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Service -Name $_.Name -Force -EA 0
         Set-Service -Name $_.Name -StartupType Disabled -EA 0
         $script:counters.OEMCleaned++
     }
     Write-Host "  Killing OEM processes..." -ForegroundColor Gray
-    Get-Process -EA 0 | Where-Object { $_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer' } | ForEach-Object {
+    Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Process -Id $_.Id -Force -EA 0
     }
 
@@ -1937,8 +1956,8 @@ if (-not $DryRun) {
 Write-Log "[Phase 2/7] OEM Nuclear Clean..." "SECTION"
 
 if (-not $DryRun) {
-    # Kill all OEM processes again (in case any respawned)
-    Get-Process -EA 0 | Where-Object { $_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer' } | Stop-Process -Force -EA 0
+    # Kill all OEM processes again (in case any respawned), preserving Intel drivers
+    Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | Stop-Process -Force -EA 0
 
     # Delete OEM folders - Program Files
     Write-Host "  Nuking OEM folders..." -ForegroundColor Gray
@@ -2063,9 +2082,9 @@ if (-not $DryRun) {
         }
     }
 
-    # Delete OEM services
+    # Delete OEM services (preserving Intel chipset/driver services)
     Write-Host "  Nuking OEM services..." -ForegroundColor Gray
-    Get-Service | Where-Object { $_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' } | ForEach-Object {
+    Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Service -Name $_.Name -Force -EA 0
         sc.exe delete $_.Name 2>$null
     }
@@ -2283,8 +2302,8 @@ if (-not $DryRun) {
         Remove-ItemProperty -Path $startupApprovedPath32_2 -Name 'WavesSvc64' -Force -EA 0
     }
 
-    # Final process kill
-    Get-Process -EA 0 | Where-Object { $_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer' } | Stop-Process -Force -EA 0
+    # Final process kill (preserving Intel chipset/driver processes)
+    Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | Stop-Process -Force -EA 0
 }
 
 Write-Host "  OEM nuclear clean complete" -ForegroundColor Green
@@ -2569,7 +2588,7 @@ $servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable'
     'RmSvc',                        # Radio Management Service
     'OneSyncSvc',                   # Sync Host
     'lmhosts',                      # TCP/IP NetBIOS Helper
-    'WSAIFabricSvc',                # Windows Subsystem for Android
+    'WSAIFabricSvc',                # Windows AI Fabric Service (Recall, AI Search)
 
     # Other Bloat
     'lfsvc',                        # Geolocation
@@ -2697,6 +2716,9 @@ Write-Host "  Disabling Edge Copilot & AI..." -ForegroundColor Gray
     "NewTabPageBingChatEnabled" = 0; "NewTabPageBingAIPromptEnabled" = 0
     "GenAILocalFoundationalModelSettings" = 0; "ComposeInlineEnabled" = 0
     "VisualSearchEnabled" = 0; "QuickSearchShowMiniMenu" = 0
+    "EdgeHistoryAISearchEnabled" = 0; "AIGenThemesEnabled" = 0
+    "BuiltInAIAPIsEnabled" = 0; "CopilotAddressBarSuggestionsEnabled" = 0
+    "EdgeEntraCopilotPageContext" = 0; "CopilotNewTabPageEnabled" = 0
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge Shopping & Promotions
