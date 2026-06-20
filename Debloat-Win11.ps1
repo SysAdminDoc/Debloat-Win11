@@ -466,29 +466,29 @@ if ($DryRun) {
     Write-Log "  [DRY RUN] Would stop Windows Update, Windows Search, SysMain" "INFO"
 } else {
     # Windows Update
-    Write-Host "  Stopping Windows Update..." -ForegroundColor Gray
+    Write-Log "  Stopping Windows Update..." "INFO"
     Stop-Service -Name 'wuauserv' -Force -EA 0
     Set-Service -Name 'wuauserv' -StartupType Disabled -EA 0
     Stop-Process -Name 'WaaSMedicAgent', 'UsoClient', 'wuauclt', 'WUDFHost' -Force -EA 0
 
     # Windows Search
-    Write-Host "  Stopping Windows Search..." -ForegroundColor Gray
+    Write-Log "  Stopping Windows Search..." "INFO"
     Stop-Service -Name 'WSearch' -Force -EA 0
     Set-Service -Name 'WSearch' -StartupType Disabled -EA 0
     Stop-Process -Name 'SearchIndexer', 'SearchHost', 'SearchApp' -Force -EA 0
 
     # SysMain (Superfetch)
-    Write-Host "  Stopping SysMain..." -ForegroundColor Gray
+    Write-Log "  Stopping SysMain..." "INFO"
     Stop-Service -Name 'SysMain' -Force -EA 0
     Set-Service -Name 'SysMain' -StartupType Disabled -EA 0
 
-    Write-Host "  Services disabled" -ForegroundColor Green
+    Write-Log "  Services disabled" "SUCCESS"
 }
 
 # ============================================================================
 # HARDWARE DETECTION (Laptop vs Desktop)
 # ============================================================================
-Write-Host "`n[Pre-Check] Detecting hardware type..." -ForegroundColor Yellow
+Write-Log "[Pre-Check] Detecting hardware type..." "SECTION"
 $script:isLaptop = $false
 $script:hasBattery = $false
 $script:chassisType = "Unknown"
@@ -531,26 +531,26 @@ $manufacturer = $computerSystem.Manufacturer
 $model = $computerSystem.Model
 
 if ($script:isLaptop) {
-    Write-Host "  Hardware: $script:chassisType" -ForegroundColor Cyan
-    Write-Host "  System: $manufacturer $model" -ForegroundColor Gray
-    Write-Host "  Battery: Present" -ForegroundColor Gray
-    Write-Host "  Power settings will be optimized for LAPTOP" -ForegroundColor Green
+    Write-Log "  Hardware: $script:chassisType" "INFO"
+    Write-Log "  System: $manufacturer $model" "INFO"
+    Write-Log "  Battery: Present" "INFO"
+    Write-Log "  Power settings will be optimized for LAPTOP" "SUCCESS"
 } else {
-    Write-Host "  Hardware: $script:chassisType" -ForegroundColor Cyan
-    Write-Host "  System: $manufacturer $model" -ForegroundColor Gray
-    Write-Host "  Battery: Not present" -ForegroundColor Gray
-    Write-Host "  Power settings will be optimized for WORKSTATION" -ForegroundColor Green
+    Write-Log "  Hardware: $script:chassisType" "INFO"
+    Write-Log "  System: $manufacturer $model" "INFO"
+    Write-Log "  Battery: Not present" "INFO"
+    Write-Log "  Power settings will be optimized for WORKSTATION" "SUCCESS"
 }
 
 # ============================================================================
 # ONEDRIVE USAGE CHECK (determines if OneDrive should be preserved)
 # ============================================================================
-Write-Host "`n[Pre-Check] Checking OneDrive status..." -ForegroundColor Yellow
+Write-Log "[Pre-Check] Checking OneDrive status..." "SECTION"
 $script:onedriveInUse = $false
 
 if ($SkipOneDriveRemoval) {
     $script:onedriveInUse = $true
-    Write-Host "  OneDrive removal skipped (-SkipOneDriveRemoval)" -ForegroundColor Gray
+    Write-Log "  OneDrive removal skipped (-SkipOneDriveRemoval)" "INFO"
 } else {
     # Check for OneDrive accounts in registry
     $personalAccount = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\OneDrive\Accounts\Personal" -EA 0
@@ -558,11 +558,11 @@ if ($SkipOneDriveRemoval) {
 
     if ($personalAccount.UserEmail) {
         $script:onedriveInUse = $true
-        Write-Host "  OneDrive in use: Personal account ($($personalAccount.UserEmail))" -ForegroundColor Gray
+        Write-Log "  OneDrive in use: Personal account ($($personalAccount.UserEmail))" "INFO"
     }
     if ($businessAccount.UserEmail) {
         $script:onedriveInUse = $true
-        Write-Host "  OneDrive in use: Business account ($($businessAccount.UserEmail))" -ForegroundColor Gray
+        Write-Log "  OneDrive in use: Business account ($($businessAccount.UserEmail))" "INFO"
     }
 
     # Check if OneDrive folder has files
@@ -571,26 +571,26 @@ if ($SkipOneDriveRemoval) {
         $fileCount = (Get-ChildItem $onedriveFolder -Recurse -File -EA 0 | Measure-Object).Count
         if ($fileCount -gt 0) {
             $script:onedriveInUse = $true
-            Write-Host "  OneDrive in use: Folder contains $fileCount files" -ForegroundColor Gray
+            Write-Log "  OneDrive in use: Folder contains $fileCount files" "INFO"
         }
     }
 }
 
 if ($script:onedriveInUse) {
-    Write-Host "  OneDrive will be PRESERVED" -ForegroundColor Green
+    Write-Log "  OneDrive will be PRESERVED" "SUCCESS"
 } else {
-    Write-Host "  OneDrive not in use - will be removed" -ForegroundColor Gray
+    Write-Log "  OneDrive not in use - will be removed" "INFO"
 }
 
 # ============================================================================
 # OFFICE USAGE CHECK (determines if Office should be preserved)
 # ============================================================================
-Write-Host "`n[Pre-Check] Checking Office status..." -ForegroundColor Yellow
+Write-Log "[Pre-Check] Checking Office status..." "SECTION"
 $script:officeInUse = $false
 
 if ($SkipOfficeRemoval) {
     $script:officeInUse = $true
-    Write-Host "  Office removal skipped (-SkipOfficeRemoval)" -ForegroundColor Gray
+    Write-Log "  Office removal skipped (-SkipOfficeRemoval)" "INFO"
 } else {
     # Check for Office 365 / Microsoft 365 subscription (ClickToRun)
     $clickToRun = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" -EA 0
@@ -599,7 +599,7 @@ if ($SkipOfficeRemoval) {
         foreach ($product in $o365Products) {
             if ($clickToRun.ProductReleaseIds -match $product) {
                 $script:officeInUse = $true
-                Write-Host "  Office 365 subscription detected: $product" -ForegroundColor Gray
+                Write-Log "  Office 365 subscription detected: $product" "INFO"
                 break
             }
         }
@@ -614,7 +614,7 @@ if ($SkipOfficeRemoval) {
             $recentUse = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Office\$ver\Common\Roaming\Identities\*" -EA 0
             if ($recentUse) {
                 $script:officeInUse = $true
-                Write-Host "  Office $ver installation in use" -ForegroundColor Gray
+                Write-Log "  Office $ver installation in use" "INFO"
                 break
             }
         }
@@ -626,7 +626,7 @@ if ($SkipOfficeRemoval) {
     if ($officeProcesses) {
         $script:officeInUse = $true
         $runningNames = ($officeProcesses | Select-Object -ExpandProperty Name -Unique) -join ', '
-        Write-Host "  Office apps currently running: $runningNames" -ForegroundColor Gray
+        Write-Log "  Office apps currently running: $runningNames" "INFO"
     }
 
     # Check for OneNote 2016 standalone (separate install from Office suite)
@@ -634,7 +634,7 @@ if ($SkipOfficeRemoval) {
         $oneNote2016 = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\16.0\OneNote\InstallRoot" -EA 0
         if ($oneNote2016.Path -and (Test-Path $oneNote2016.Path)) {
             $script:officeInUse = $true
-            Write-Host "  OneNote 2016 standalone detected" -ForegroundColor Gray
+            Write-Log "  OneNote 2016 standalone detected" "INFO"
         }
     }
 
@@ -644,7 +644,7 @@ if ($SkipOfficeRemoval) {
             $appInstall = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Office\16.0\$appKey\InstallRoot" -EA 0
             if ($appInstall.Path -and (Test-Path $appInstall.Path)) {
                 $script:officeInUse = $true
-                Write-Host "  $appKey standalone detected" -ForegroundColor Gray
+                Write-Log "  $appKey standalone detected" "INFO"
                 break
             }
         }
@@ -652,9 +652,9 @@ if ($SkipOfficeRemoval) {
 }
 
 if ($script:officeInUse) {
-    Write-Host "  Office will be PRESERVED" -ForegroundColor Green
+    Write-Log "  Office will be PRESERVED" "SUCCESS"
 } else {
-    Write-Host "  Office not in use - will be removed" -ForegroundColor Gray
+    Write-Log "  Office not in use - will be removed" "INFO"
 }
 
 # ============================================================================
@@ -662,10 +662,10 @@ if ($script:officeInUse) {
 # ============================================================================
 Update-Phase "System Tweaks"
 if (Test-PhaseEnabled 'SystemTweaks') {
-Write-Host "`n[System Tweaks] Applying registry tweaks..." -ForegroundColor Yellow
+Write-Log "[System Tweaks] Applying registry tweaks..." "SECTION"
 
 # Privacy & Telemetry
-Write-Host "  Disabling telemetry & tracking..." -ForegroundColor Gray
+Write-Log "  Disabling telemetry & tracking..." "INFO"
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" -Name "AllowTelemetry" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "AllowTelemetry" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "EnableActivityFeed" -Value 0
@@ -684,7 +684,7 @@ if (-not $DryRun) {
 }
 
 # Disable Copilot, Cortana, Recall
-Write-Host "  Disabling Copilot, Cortana, Recall..." -ForegroundColor Gray
+Write-Log "  Disabling Copilot, Cortana, Recall..." "INFO"
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "AllowCortana" -Value 0
@@ -695,7 +695,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\WindowsNotepad" -Name "DisableAIFeatures"
 # ============================================================================
 # WINDOWS 11 24H2/25H2 BLOAT (New in v1.1.0)
 # ============================================================================
-Write-Host "  Disabling Windows 11 24H2/25H2 bloat..." -ForegroundColor Gray
+Write-Log "  Disabling Windows 11 24H2/25H2 bloat..." "INFO"
 
 # --- Disable Windows Recall (AI screenshot feature) thoroughly ---
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "TurnOffSavingSnapshots" -Value 1
@@ -755,9 +755,9 @@ $teamsRunning = Get-Process -Name 'ms-teams', 'msteams' -EA 0
 if (-not $teamsRunning) {
     Remove-AppxDryRun -Pattern '*MSTeams*'
     Remove-AppxDryRun -Pattern '*MicrosoftTeams*'
-    Write-Host "    Teams (new) removed" -ForegroundColor DarkGray
+    Write-Log "    Teams (new) removed" "INFO"
 } else {
-    Write-Host "    Teams in use - preserved" -ForegroundColor DarkGray
+    Write-Log "    Teams in use - preserved" "INFO"
 }
 
 # --- Disable Phone Link auto-start ---
@@ -771,10 +771,10 @@ if (-not $DryRun) {
     Remove-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "PhoneLinkAutoStart" -Force -EA 0
 }
 
-Write-Host "  24H2/25H2 bloat disabled" -ForegroundColor Green
+Write-Log "  24H2/25H2 bloat disabled" "SUCCESS"
 
 # Disable Bing Search
-Write-Host "  Disabling Bing Search..." -ForegroundColor Gray
+Write-Log "  Disabling Bing Search..." "INFO"
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" -Name "BingSearchEnabled" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "DisableWebSearch" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer" -Name "DisableSearchBoxSuggestions" -Value 1
@@ -784,7 +784,7 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings" -
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
 
 # Edge Telemetry
-Write-Host "  Disabling Edge telemetry..." -ForegroundColor Gray
+Write-Log "  Disabling Edge telemetry..." "INFO"
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "DiagnosticData" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "PersonalizationReportingEnabled" -Value 0
 
@@ -792,7 +792,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "PersonalizationRep
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" -Name "DisableWindowsConsumerFeatures" -Value 1
 
 # Taskbar & UI
-Write-Host "  Applying taskbar & UI tweaks..." -ForegroundColor Gray
+Write-Log "  Applying taskbar & UI tweaks..." "INFO"
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarAl" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowTaskViewButton" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarDa" -Value 0
@@ -809,7 +809,7 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" -Name "Se
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarGlomLevel" -Value 1
 
 # Dark mode
-Write-Host "  Enabling dark mode..." -ForegroundColor Gray
+Write-Log "  Enabling dark mode..." "INFO"
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "AppsUseLightTheme" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "SystemUsesLightTheme" -Value 0
 
@@ -829,13 +829,13 @@ if (-not $DryRun) {
 }
 
 # Disable GameDVR
-Write-Host "  Disabling GameDVR..." -ForegroundColor Gray
+Write-Log "  Disabling GameDVR..." "INFO"
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\GameDVR" -Name "AppCaptureEnabled" -Value 0
 Set-Reg -Path "HKCU:\System\GameConfigStore" -Name "GameDVR_Enabled" -Value 0
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\GameDVR" -Name "AllowGameDVR" -Value 0
 
 # Disable Sticky Keys popup
-Write-Host "  Disabling Sticky Keys..." -ForegroundColor Gray
+Write-Log "  Disabling Sticky Keys..." "INFO"
 Set-Reg -Path "HKCU:\Control Panel\Accessibility\StickyKeys" -Name "Flags" -Value "506" -Type "String"
 Set-Reg -Path "HKCU:\Control Panel\Accessibility\ToggleKeys" -Name "Flags" -Value "58" -Type "String"
 Set-Reg -Path "HKCU:\Control Panel\Accessibility\Keyboard Response" -Name "Flags" -Value "122" -Type "String"
@@ -851,7 +851,7 @@ if (-not $DryRun) {
 }
 
 # OOBE & Nag Screens
-Write-Host "  Disabling OOBE & nag screens..." -ForegroundColor Gray
+Write-Log "  Disabling OOBE & nag screens..." "INFO"
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\OOBE" -Name "DisablePrivacyExperience" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" -Name "DisablePrivacyExperience" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "EnableFirstLogonAnimation" -Value 0
@@ -859,7 +859,7 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngage
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\SystemSettings\AccountNotifications" -Name "EnableAccountNotifications" -Value 0
 
 # Content Delivery Manager (Start Menu Ads)
-Write-Host "  Disabling Start Menu ads..." -ForegroundColor Gray
+Write-Log "  Disabling Start Menu ads..." "INFO"
 $CDMPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
 @("SystemPaneSuggestionsEnabled", "SubscribedContent-310093Enabled", "SubscribedContent-338387Enabled", "SubscribedContent-338388Enabled",
   "SubscribedContent-338389Enabled", "SubscribedContent-338393Enabled", "SubscribedContent-353694Enabled", "SubscribedContent-353696Enabled",
@@ -879,7 +879,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "E
 # ============================================================================
 # PERFORMANCE TWEAKS
 # ============================================================================
-Write-Host "  Applying performance tweaks..." -ForegroundColor Gray
+Write-Log "  Applying performance tweaks..." "INFO"
 
 if (-not $DryRun) {
     # High performance power plan (will be overridden later based on hardware)
@@ -901,7 +901,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager" -
 # ============================================================================
 # ANNOYANCE FIXES
 # ============================================================================
-Write-Host "  Disabling Windows nags & popups..." -ForegroundColor Gray
+Write-Log "  Disabling Windows nags & popups..." "INFO"
 
 # Disable "New apps can open this file type" notifications
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer" -Name "NoNewAppAlert" -Value 1
@@ -925,7 +925,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer
 # ============================================================================
 # EXPLORER TWEAKS
 # ============================================================================
-Write-Host "  Applying Explorer tweaks..." -ForegroundColor Gray
+Write-Log "  Applying Explorer tweaks..." "INFO"
 
 # Open to "This PC" instead of Quick Access
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "LaunchTo" -Value 1
@@ -965,7 +965,7 @@ Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
 # ============================================================================
 # WINDOWS UPDATE CONTROL
 # ============================================================================
-Write-Host "  Configuring Windows Update..." -ForegroundColor Gray
+Write-Log "  Configuring Windows Update..." "INFO"
 
 # Disable auto-restart during active hours
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoRebootWithLoggedOnUsers" -Value 1
@@ -981,63 +981,63 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization" -
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ManagePreviewBuilds" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ManagePreviewBuildsPolicyValue" -Value 0
 
-Write-Host "  System tweaks applied" -ForegroundColor Green
+Write-Log "  System tweaks applied" "SUCCESS"
 
 # ============================================================================
 # SSD OPTIMIZATION (If SSD detected)
 # ============================================================================
 if ($script:isSSD) {
-    Write-Host "`n[SSD] Applying SSD optimizations..." -ForegroundColor Yellow
+    Write-Log "[SSD] Applying SSD optimizations..." "SECTION"
 
     if (-not $DryRun) {
         # Disable scheduled defrag on SSD (Windows should do this automatically but ensure it)
         $defragTask = Get-ScheduledTask -TaskName "ScheduledDefrag" -EA 0
         if ($defragTask) {
             # Don't disable entirely, but ensure SSD optimization mode
-            Write-Host "  Configuring defrag for SSD optimization..." -ForegroundColor Gray
+            Write-Log "  Configuring defrag for SSD optimization..." "INFO"
         }
 
         # Ensure TRIM is enabled
         fsutil behavior set DisableDeleteNotify 0 | Out-Null
-        Write-Host "  TRIM enabled" -ForegroundColor Gray
+        Write-Log "  TRIM enabled" "INFO"
 
         # Disable Superfetch/SysMain on SSD (not needed, reduces writes)
         Stop-Service -Name 'SysMain' -Force -EA 0
         Set-Service -Name 'SysMain' -StartupType Disabled -EA 0
-        Write-Host "  Superfetch disabled (not needed on SSD)" -ForegroundColor Gray
+        Write-Log "  Superfetch disabled (not needed on SSD)" "INFO"
 
         # Disable last access timestamp (reduces writes)
         fsutil behavior set disablelastaccess 1 | Out-Null
-        Write-Host "  Last access timestamp disabled" -ForegroundColor Gray
+        Write-Log "  Last access timestamp disabled" "INFO"
     } else {
-        Write-Host "  [DRY RUN] Would enable TRIM, disable Superfetch, disable last access timestamp" "INFO"
+        Write-Log "  [DRY RUN] Would enable TRIM, disable Superfetch, disable last access timestamp" "INFO"
     }
 
     # Disable Prefetch on SSD
     Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" -Name "EnablePrefetcher" -Value 0
     Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters" -Name "EnableSuperfetch" -Value 0
-    Write-Host "  Prefetch disabled (not needed on SSD)" -ForegroundColor Gray
+    Write-Log "  Prefetch disabled (not needed on SSD)" "INFO"
 
-    Write-Host "  SSD optimizations applied" -ForegroundColor Green
+    Write-Log "  SSD optimizations applied" "SUCCESS"
 } else {
-    Write-Host "`n[HDD] Keeping HDD-optimized settings..." -ForegroundColor Yellow
+    Write-Log "[HDD] Keeping HDD-optimized settings..." "SECTION"
     if (-not $DryRun) {
         # Keep Superfetch enabled for HDD
         Set-Service -Name 'SysMain' -StartupType Automatic -EA 0
         Start-Service -Name 'SysMain' -EA 0
     }
-    Write-Host "  Superfetch enabled (improves HDD performance)" -ForegroundColor Gray
+    Write-Log "  Superfetch enabled (improves HDD performance)" "INFO"
 }
 
 # ============================================================================
 # WINDOWS UPDATE CONTROL (Active Hours & Deferrals)
 # ============================================================================
-Write-Host "`n[Windows Update] Configuring update behavior..." -ForegroundColor Yellow
+Write-Log "[Windows Update] Configuring update behavior..." "SECTION"
 
 # Set active hours to prevent auto-restart during work (6 AM - 11 PM)
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "ActiveHoursStart" -Value 6
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" -Name "ActiveHoursEnd" -Value 23
-Write-Host "  Active hours: 6 AM - 11 PM (no auto-restart)" -ForegroundColor Gray
+Write-Log "  Active hours: 6 AM - 11 PM (no auto-restart)" "INFO"
 
 # Disable auto-restart with logged on users
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "NoAutoRebootWithLoggedOnUsers" -Value 1
@@ -1045,12 +1045,12 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name
 # Defer feature updates by 365 days (security updates still apply)
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "DeferFeatureUpdates" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "DeferFeatureUpdatesPeriodInDays" -Value 365
-Write-Host "  Feature updates deferred 365 days" -ForegroundColor Gray
+Write-Log "  Feature updates deferred 365 days" "INFO"
 
 # Defer quality updates by 4 days (gives time to catch bad updates)
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "DeferQualityUpdates" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "DeferQualityUpdatesPeriodInDays" -Value 4
-Write-Host "  Quality updates deferred 4 days" -ForegroundColor Gray
+Write-Log "  Quality updates deferred 4 days" "INFO"
 
 # Disable seeker updates (don't auto-download optional updates)
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "SetDisableUXWUAccess" -Value 0
@@ -1058,12 +1058,12 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "S
 # Notify before download/install (don't auto-install)
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -Name "AUOptions" -Value 2
 
-Write-Host "  Windows Update configured" -ForegroundColor Green
+Write-Log "  Windows Update configured" "SUCCESS"
 
 # ============================================================================
 # START MENU CLEANUP (Unpin Bloatware Tiles)
 # ============================================================================
-Write-Host "`n[Start Menu] Cleaning pinned items..." -ForegroundColor Yellow
+Write-Log "[Start Menu] Cleaning pinned items..." "SECTION"
 
 if (-not $DryRun) {
     # Windows 11 Start Menu layout cleanup
@@ -1078,12 +1078,12 @@ if (-not $DryRun) {
 # FeatureManagementEnabled not covered by the comprehensive CDM block above
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "FeatureManagementEnabled" -Value 0
 
-Write-Host "  Start Menu cleaned" -ForegroundColor Green
+Write-Log "  Start Menu cleaned" "SUCCESS"
 
 # ============================================================================
 # FILE EXPLORER CLEANUP (Remove Clutter)
 # ============================================================================
-Write-Host "`n[Explorer] Removing Explorer clutter..." -ForegroundColor Yellow
+Write-Log "[Explorer] Removing Explorer clutter..." "SECTION"
 
 # Remove Gallery from navigation pane (Windows 11)
 Set-Reg -Path "HKCU:\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}" -Name "System.IsPinnedToNameSpaceTree" -Value 0
@@ -1098,29 +1098,29 @@ if (-not $DryRun) {
         "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}"
     ) | ForEach-Object { Remove-Item $_ -Recurse -Force -EA 0 }
 }
-Write-Host "  Removed 3D Objects folder" -ForegroundColor Gray
+Write-Log "  Removed 3D Objects folder" "INFO"
 
 # Disable OneDrive ads in Explorer
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowSyncProviderNotifications" -Value 0
-Write-Host "  Disabled OneDrive ads in Explorer" -ForegroundColor Gray
+Write-Log "  Disabled OneDrive ads in Explorer" "INFO"
 
 # Disable "Show more options" (restore Windows 10 context menu on Win11)
 # Only apply on Windows 11
 if ([int]$osBuild -ge 22000) {
     Set-Reg -Path "HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32" -Name "(Default)" -Value "" -Type "String"
-    Write-Host "  Restored classic context menu (Windows 11)" -ForegroundColor Gray
+    Write-Log "  Restored classic context menu (Windows 11)" "INFO"
 }
 
 # Disable ads/tips in Settings app
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy" -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0
 
-Write-Host "  Explorer cleanup complete" -ForegroundColor Green
+Write-Log "  Explorer cleanup complete" "SUCCESS"
 
 # ============================================================================
 # WIDGETS REMOVAL (Windows 11)
 # ============================================================================
 if ([int]$osBuild -ge 22000) {
-    Write-Host "`n[Widgets] Removing Windows 11 Widgets..." -ForegroundColor Yellow
+    Write-Log "[Widgets] Removing Windows 11 Widgets..." "SECTION"
 
     # Disable Widgets
     Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
@@ -1133,13 +1133,13 @@ if ([int]$osBuild -ge 22000) {
         Get-AppxProvisionedPackage -Online -EA 0 | Where-Object { $_.DisplayName -match 'WebExperience' } | Remove-AppxProvisionedPackage -Online -EA 0
     }
 
-    Write-Host "  Widgets removed" -ForegroundColor Green
+    Write-Log "  Widgets removed" "SUCCESS"
 }
 
 # ============================================================================
 # STARTUP APPS CLEANUP (Common Bloatware Auto-Starts)
 # ============================================================================
-Write-Host "`n[Startup] Cleaning startup items..." -ForegroundColor Yellow
+Write-Log "[Startup] Cleaning startup items..." "SECTION"
 
 # Registry Run keys to clean (HKCU)
 $startupBloat = @(
@@ -1173,7 +1173,7 @@ if (-not $DryRun) {
         Get-ItemProperty $runKey -EA 0 | ForEach-Object {
             $_.PSObject.Properties | Where-Object { $_.Name -like $item } | ForEach-Object {
                 Remove-ItemProperty -Path $runKey -Name $_.Name -Force -EA 0
-                Write-Host "    Removed: $($_.Name)" -ForegroundColor DarkGray
+                Write-Log "    Removed: $($_.Name)" "INFO"
             }
         }
     }
@@ -1184,7 +1184,7 @@ if (-not $DryRun) {
         Get-ItemProperty $runKeyLM -EA 0 | ForEach-Object {
             $_.PSObject.Properties | Where-Object { $_.Name -like $item } | ForEach-Object {
                 Remove-ItemProperty -Path $runKeyLM -Name $_.Name -Force -EA 0
-                Write-Host "    Removed (system): $($_.Name)" -ForegroundColor DarkGray
+                Write-Log "    Removed (system): $($_.Name)" "INFO"
             }
         }
     }
@@ -1203,7 +1203,7 @@ if (-not $DryRun) {
     if (-not $script:onedriveInUse) {
         Remove-ItemProperty -Path $runKey -Name "OneDrive" -Force -EA 0
         Remove-ItemProperty -Path $runKey -Name "OneDriveSetup" -Force -EA 0
-        Write-Host "    Removed: OneDrive (not in use)" -ForegroundColor DarkGray
+        Write-Log "    Removed: OneDrive (not in use)" "INFO"
     }
 
     # Clean Startup folder shortcuts
@@ -1217,15 +1217,15 @@ if (-not $DryRun) {
         Get-ChildItem $startupFolder -Filter $pattern -EA 0 | Remove-Item -Force -EA 0
     }
 } else {
-    Write-Host "  [DRY RUN] Would clean startup registry keys and shortcuts" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would clean startup registry keys and shortcuts" "INFO"
 }
 
-Write-Host "  Startup items cleaned" -ForegroundColor Green
+Write-Log "  Startup items cleaned" "SUCCESS"
 
 # ============================================================================
 # NOTIFICATION CLEANUP (More Comprehensive)
 # ============================================================================
-Write-Host "`n[Notifications] Disabling notification spam..." -ForegroundColor Yellow
+Write-Log "[Notifications] Disabling notification spam..." "SECTION"
 
 # Disable Focus Assist notifications about apps
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\CloudStore\Store\Cache\DefaultAccount" -Name "FocusAssistStateChanged" -Value 0
@@ -1246,13 +1246,13 @@ foreach ($notifier in $annoyingNotifiers) {
     Set-Reg -Path $notifierPath -Name "Enabled" -Value 0
 }
 
-Write-Host "  Notifications configured" -ForegroundColor Green
+Write-Log "  Notifications configured" "SUCCESS"
 
 # ============================================================================
 # WINDOWS DEFENDER EXCLUSIONS (Medical Imaging Paths)
 # ============================================================================
 if (-not $KeepDefender) {
-    Write-Host "`n[Defender] Adding folder exclusions..." -ForegroundColor Yellow
+    Write-Log "[Defender] Adding folder exclusions..." "SECTION"
 
     # Allow config file to override Defender exclusions
     $defenderExclusions = if ($script:configOverrides.ContainsKey('DefenderExclusions')) { $script:configOverrides.DefenderExclusions } else { @(
@@ -1274,21 +1274,21 @@ if (-not $KeepDefender) {
             Add-MpPreference -ExclusionPath $path -EA 0
         }
     } else {
-        Write-Host "  [DRY RUN] Would add $($defenderExclusions.Count) Defender exclusions" -ForegroundColor Cyan
+        Write-Log "  [DRY RUN] Would add $($defenderExclusions.Count) Defender exclusions" "INFO"
     }
-    Write-Host "  Defender exclusions added" -ForegroundColor Green
+    Write-Log "  Defender exclusions added" "SUCCESS"
 } else {
-    Write-Host "`n[Defender] Skipped (-KeepDefender)" -ForegroundColor Yellow
+    Write-Log "[Defender] Skipped (-KeepDefender)" "SECTION"
 }
 
 # ============================================================================
 # POWER SETTINGS (Hardware-Aware)
 # ============================================================================
-Write-Host "`n[Power] Configuring power settings..." -ForegroundColor Yellow
+Write-Log "[Power] Configuring power settings..." "SECTION"
 
 if (-not $DryRun) {
     if ($script:isLaptop) {
-        Write-Host "  Applying LAPTOP power profile..." -ForegroundColor Gray
+        Write-Log "  Applying LAPTOP power profile..." "INFO"
 
         # Use Balanced power plan for laptops (better battery life)
         powercfg /setactive 381b4222-f694-41f0-9685-ff5bb260df2e 2>$null
@@ -1345,7 +1345,7 @@ if (-not $DryRun) {
         powercfg /setdcvalueindex SCHEME_CURRENT 4f971e89-eebd-4455-a8de-9e59040e7347 7648efa3-dd9c-4e3e-b566-50f929386280 1
 
     } else {
-        Write-Host "  Applying WORKSTATION power profile..." -ForegroundColor Gray
+        Write-Log "  Applying WORKSTATION power profile..." "INFO"
 
         # Use High Performance power plan for desktops
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
@@ -1375,18 +1375,18 @@ if (-not $DryRun) {
     # Apply changes
     powercfg /setactive SCHEME_CURRENT
 } else {
-    Write-Host "  [DRY RUN] Would configure power settings for $(if ($script:isLaptop) { 'LAPTOP' } else { 'WORKSTATION' })" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would configure power settings for $(if ($script:isLaptop) { 'LAPTOP' } else { 'WORKSTATION' })" "INFO"
 }
 
 # Disable fast startup (can cause issues with dual-boot and driver loading)
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power" -Name "HiberbootEnabled" -Value 0
 
-Write-Host "  Power settings configured" -ForegroundColor Green
+Write-Log "  Power settings configured" "SUCCESS"
 
 # ============================================================================
 # NETWORK OPTIMIZATION
 # ============================================================================
-Write-Host "`n[Network] Optimizing network settings..." -ForegroundColor Yellow
+Write-Log "[Network] Optimizing network settings..." "SECTION"
 
 if (-not $DryRun) {
     # Set network profile to Private (for file sharing)
@@ -1403,15 +1403,15 @@ if (-not $DryRun) {
     netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes 2>$null
     netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes 2>$null
 } else {
-    Write-Host "  [DRY RUN] Would set Private profile, disable Nagle's, enable discovery" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would set Private profile, disable Nagle's, enable discovery" "INFO"
 }
 
-Write-Host "  Network settings optimized" -ForegroundColor Green
+Write-Log "  Network settings optimized" "SUCCESS"
 
 # ============================================================================
 # DESKTOP CLEANUP
 # ============================================================================
-Write-Host "`n[Desktop] Cleaning desktop shortcuts..." -ForegroundColor Yellow
+Write-Log "[Desktop] Cleaning desktop shortcuts..." "SECTION"
 
 if (-not $DryRun) {
     # Remove Edge shortcut from desktop
@@ -1433,12 +1433,12 @@ if (-not $DryRun) {
     }
 }
 
-Write-Host "  Desktop cleaned" -ForegroundColor Green
+Write-Log "  Desktop cleaned" "SUCCESS"
 
 # ============================================================================
 # LOCK SCREEN & SPOTLIGHT CLEANUP
 # ============================================================================
-Write-Host "`n[Lock Screen] Disabling ads and spotlight..." -ForegroundColor Yellow
+Write-Log "[Lock Screen] Disabling ads and spotlight..." "SECTION"
 
 # Disable Windows Spotlight (CDM keys handled in comprehensive block above)
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" -Name "DisableWindowsSpotlightFeatures" -Value 1
@@ -1448,12 +1448,12 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" -Name "Di
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings" -Name "NOC_GLOBAL_SETTING_ALLOW_TOASTS_ABOVE_LOCK" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Notifications\Settings" -Name "NOC_GLOBAL_SETTING_ALLOW_CRITICAL_TOASTS_ABOVE_LOCK" -Value 0
 
-Write-Host "  Lock screen configured" -ForegroundColor Green
+Write-Log "  Lock screen configured" "SUCCESS"
 
 # ============================================================================
 # SNAP ASSIST & WINDOW MANAGEMENT
 # ============================================================================
-Write-Host "`n[Windows] Configuring snap assist..." -ForegroundColor Yellow
+Write-Log "[Windows] Configuring snap assist..." "SECTION"
 
 # Disable Snap Assist suggestions (annoying popup when snapping windows)
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "SnapAssist" -Value 0
@@ -1467,12 +1467,12 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced
 # Keep basic snap functionality working
 Set-Reg -Path "HKCU:\Control Panel\Desktop" -Name "WindowArrangementActive" -Value 1
 
-Write-Host "  Snap assist configured" -ForegroundColor Green
+Write-Log "  Snap assist configured" "SUCCESS"
 
 # ============================================================================
 # WINDOWS INK & TOUCH
 # ============================================================================
-Write-Host "`n[Input] Disabling Windows Ink workspace..." -ForegroundColor Yellow
+Write-Log "[Input] Disabling Windows Ink workspace..." "SECTION"
 
 # Disable Windows Ink Workspace
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\WindowsInkWorkspace" -Name "AllowWindowsInkWorkspace" -Value 0
@@ -1489,12 +1489,12 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\InputPersonalization" -Name "RestrictImp
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\InputPersonalization" -Name "RestrictImplicitInkCollection" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\InputPersonalization\TrainedDataStore" -Name "HarvestContacts" -Value 0
 
-Write-Host "  Input settings configured" -ForegroundColor Green
+Write-Log "  Input settings configured" "SUCCESS"
 
 # ============================================================================
 # SECURITY HARDENING
 # ============================================================================
-Write-Host "`n[Security] Applying security settings..." -ForegroundColor Yellow
+Write-Log "[Security] Applying security settings..." "SECTION"
 
 # Disable Remote Assistance
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name "fAllowToGetHelp" -Value 0
@@ -1504,12 +1504,12 @@ Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name "
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name "NoDriveTypeAutoRun" -Value 255
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name "NoDriveTypeAutoRun" -Value 255
 
-Write-Host "  Security settings applied" -ForegroundColor Green
+Write-Log "  Security settings applied" "SUCCESS"
 
 # ============================================================================
 # TIME SYNCHRONIZATION
 # ============================================================================
-Write-Host "`n[Time] Configuring time sync..." -ForegroundColor Yellow
+Write-Log "[Time] Configuring time sync..." "SECTION"
 
 if (-not $DryRun) {
     # Enable Windows Time service
@@ -1523,12 +1523,12 @@ if (-not $DryRun) {
     w32tm /config /manualpeerlist:"time.windows.com" /syncfromflags:manual /reliable:yes /update 2>$null
 }
 
-Write-Host "  Time sync configured" -ForegroundColor Green
+Write-Log "  Time sync configured" "SUCCESS"
 
 # ============================================================================
 # DISABLE DRIVER UPDATES VIA WINDOWS UPDATE
 # ============================================================================
-Write-Host "`n[Drivers] Disabling driver updates via Windows Update..." -ForegroundColor Yellow
+Write-Log "[Drivers] Disabling driver updates via Windows Update..." "SECTION"
 
 # Exclude drivers from Windows Update
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate" -Name "ExcludeWUDriversInQualityUpdate" -Value 1
@@ -1537,12 +1537,12 @@ Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching" 
 # Disable automatic device driver downloads
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Device Metadata" -Name "PreventDeviceMetadataFromNetwork" -Value 1
 
-Write-Host "  Driver updates disabled" -ForegroundColor Green
+Write-Log "  Driver updates disabled" "SUCCESS"
 
 # ============================================================================
 # DEFAULT USER PROFILE CLEANUP (For new user accounts)
 # ============================================================================
-Write-Host "`n[Default Profile] Configuring default user settings..." -ForegroundColor Yellow
+Write-Log "[Default Profile] Configuring default user settings..." "SECTION"
 
 if (-not $DryRun) {
     $defaultUserReg = "C:\Users\Default\NTUSER.DAT"
@@ -1582,21 +1582,21 @@ if (-not $DryRun) {
             [gc]::Collect()
             Start-Sleep -Milliseconds 500
             reg unload $hiveName 2>$null
-            Write-Host "  Default profile configured" -ForegroundColor Green
+            Write-Log "  Default profile configured" "SUCCESS"
         } else {
-            Write-Host "  Could not load default profile" -ForegroundColor Gray
+            Write-Log "  Could not load default profile" "INFO"
         }
     } else {
-        Write-Host "  Default profile not found" -ForegroundColor Gray
+        Write-Log "  Default profile not found" "INFO"
     }
 } else {
-    Write-Host "  [DRY RUN] Would configure default user profile" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would configure default user profile" "INFO"
 }
 
 # ============================================================================
 # CONTEXT MENU CLEANUP
 # ============================================================================
-Write-Host "`n[Context Menu] Removing bloat entries..." -ForegroundColor Yellow
+Write-Log "[Context Menu] Removing bloat entries..." "SECTION"
 
 if (-not $DryRun) {
     # Remove "Edit with Paint 3D" context menu
@@ -1645,12 +1645,12 @@ if (-not $DryRun) {
     ) | ForEach-Object { if (Test-Path $_) { Remove-Item $_ -Force -EA 0 } }
 }
 
-Write-Host "  Context menu cleaned" -ForegroundColor Green
+Write-Log "  Context menu cleaned" "SUCCESS"
 
 # ============================================================================
 # DISABLE WINDOWS OPTIONAL FEATURES
 # ============================================================================
-Write-Host "`n[Optional Features] Disabling legacy features..." -ForegroundColor Yellow
+Write-Log "[Optional Features] Disabling legacy features..." "SECTION"
 
 $featuresToDisable = @(
     'Internet-Explorer-Optional-amd64',   # Internet Explorer mode
@@ -1669,15 +1669,15 @@ if (-not $DryRun) {
     foreach ($feature in $featuresToDisable) {
         $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -EA 0
         if ($state -and $state.State -eq 'Enabled') {
-            Write-Host "  Disabling $feature..." -ForegroundColor Gray
+            Write-Log "  Disabling $feature..." "INFO"
             Disable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart -EA 0 | Out-Null
         }
     }
 } else {
-    Write-Host "  [DRY RUN] Would disable $($featuresToDisable.Count) optional features" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would disable $($featuresToDisable.Count) optional features" "INFO"
 }
 
-Write-Host "  Optional features configured" -ForegroundColor Green
+Write-Log "  Optional features configured" "SUCCESS"
 } else { Write-Log "[System Tweaks] SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
@@ -1831,11 +1831,11 @@ if (-not $DryRun) {
     }
 }
 
-Write-Host "  Bloatware packages removed" -ForegroundColor Green
+Write-Log "  Bloatware packages removed" "SUCCESS"
 
 # Remove Remote Desktop Connection shortcuts (mstsc is a system component)
 if (-not $DryRun) {
-    Write-Host "  Removing Remote Desktop shortcuts..." -ForegroundColor Gray
+    Write-Log "  Removing Remote Desktop shortcuts..." "INFO"
     @(
         "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Accessories\Remote Desktop Connection.lnk",
         "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Windows Accessories\Remote Desktop Connection.lnk",
@@ -1858,13 +1858,13 @@ $script:oemSafeIntelPattern = 'igfx|IntelAudio|Intel.*Driver|Intel.*Chipset|Intc
 
 if (-not $DryRun) {
     # Stop all OEM services and processes FIRST (ensures clean removal)
-    Write-Host "  Disabling OEM services..." -ForegroundColor Gray
+    Write-Log "  Disabling OEM services..." "INFO"
     Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Service -Name $_.Name -Force -EA 0
         Set-Service -Name $_.Name -StartupType Disabled -EA 0
         $script:counters.OEMCleaned++
     }
-    Write-Host "  Killing OEM processes..." -ForegroundColor Gray
+    Write-Log "  Killing OEM processes..." "INFO"
     Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Process -Id $_.Id -Force -EA 0
     }
@@ -1884,9 +1884,9 @@ if (-not $DryRun) {
     Get-Package *Dell* 2>$null | Uninstall-Package -Force 2>$null
     Get-Package *Intel* 2>$null | Uninstall-Package -Force 2>$null
 
-    Write-Host "  OEM AppX packages removed" -ForegroundColor Green
+    Write-Log "  OEM AppX packages removed" "SUCCESS"
 } else {
-    Write-Host "  [DRY RUN] Would remove OEM services, processes, and AppX packages" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would remove OEM services, processes, and AppX packages" "INFO"
     $script:counters.OEMCleaned += 5
 }
 
@@ -1900,7 +1900,7 @@ if (-not $DryRun) {
     Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | Stop-Process -Force -EA 0
 
     # Delete OEM folders - Program Files
-    Write-Host "  Nuking OEM folders..." -ForegroundColor Gray
+    Write-Log "  Nuking OEM folders..." "INFO"
 
     # Take ownership and delete stubborn ProgramData folders
     @(
@@ -2023,7 +2023,7 @@ if (-not $DryRun) {
     }
 
     # Delete OEM services (preserving Intel chipset/driver services)
-    Write-Host "  Nuking OEM services..." -ForegroundColor Gray
+    Write-Log "  Nuking OEM services..." "INFO"
     Get-Service | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.DisplayName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern -and $_.DisplayName -notmatch $script:oemSafeIntelPattern } | ForEach-Object {
         Stop-Service -Name $_.Name -Force -EA 0
         sc.exe delete $_.Name 2>$null
@@ -2035,16 +2035,16 @@ if (-not $DryRun) {
     sc.exe delete 'WavesSvc64' 2>$null
 
     # Delete OEM scheduled tasks
-    Write-Host "  Nuking OEM scheduled tasks..." -ForegroundColor Gray
+    Write-Log "  Nuking OEM scheduled tasks..." "INFO"
     Get-ScheduledTask -EA 0 | Where-Object { $_.TaskName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.TaskPath -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer' } | ForEach-Object {
         Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -EA 0
     }
 } else {
-    Write-Host "  [DRY RUN] Would nuke OEM folders, services, tasks, and registry" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would nuke OEM folders, services, tasks, and registry" "INFO"
 }
 
 # Disabling bloat scheduled tasks
-Write-Host "  Disabling bloat scheduled tasks..." -ForegroundColor Gray
+Write-Log "  Disabling bloat scheduled tasks..." "INFO"
 $tasksToDisable = @(
     # Xbox
     'XblGameSaveTask',
@@ -2127,7 +2127,7 @@ if (-not $DryRun) {
 
 if (-not $DryRun) {
     # Delete OEM registry keys - HKLM
-    Write-Host "  Nuking OEM registry..." -ForegroundColor Gray
+    Write-Log "  Nuking OEM registry..." "INFO"
     @(
         'HKLM:\SOFTWARE\Dell',
         'HKLM:\SOFTWARE\DellInc',
@@ -2213,7 +2213,7 @@ if (-not $DryRun) {
     }
 
     # Remove specific startup entries (Task Manager startup apps)
-    Write-Host "  Removing startup apps..." -ForegroundColor Gray
+    Write-Log "  Removing startup apps..." "INFO"
 
     # Remove WavesSvc / Waves MaxxAudio from startup
     foreach ($path in $startupPaths) {
@@ -2246,7 +2246,7 @@ if (-not $DryRun) {
     Get-Process -EA 0 | Where-Object { ($_.Name -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.Path -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer') -and $_.Name -notmatch $script:oemSafeIntelPattern } | Stop-Process -Force -EA 0
 }
 
-Write-Host "  OEM nuclear clean complete" -ForegroundColor Green
+Write-Log "  OEM nuclear clean complete" "SUCCESS"
 } else { Write-Log "[Phase 2/7] OEM cleanup SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
@@ -2272,7 +2272,7 @@ if (-not (Test-PhaseEnabled 'OneDrive')) {
         )
         foreach ($path in $oneDrivePaths) {
             if (Test-Path $path) {
-                Write-Host "  Running OneDrive uninstaller..." -ForegroundColor Gray
+                Write-Log "  Running OneDrive uninstaller..." "INFO"
                 Start-Process $path -ArgumentList '/uninstall' -Wait -WindowStyle Hidden -EA 0
                 break
             }
@@ -2302,10 +2302,10 @@ if (-not (Test-PhaseEnabled 'OneDrive')) {
         reg delete "HKCR\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}" /f 2>$null
         reg delete "HKCR\Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}" /f 2>$null
     } else {
-        Write-Host "  [DRY RUN] Would uninstall OneDrive, clean folders and registry" -ForegroundColor Cyan
+        Write-Log "  [DRY RUN] Would uninstall OneDrive, clean folders and registry" "INFO"
     }
 
-    Write-Host "  OneDrive removed" -ForegroundColor Green
+    Write-Log "  OneDrive removed" "SUCCESS"
 }
 
 # ============================================================================
@@ -2321,7 +2321,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
 
     if (-not $DryRun) {
         # Kill OneNote standalone installs first (all languages) - NUCLEAR
-        Write-Host "  Nuking OneNote installations..." -ForegroundColor Gray
+        Write-Log "  Nuking OneNote installations..." "INFO"
         $uninstallPaths = @(
             'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
             'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
@@ -2330,7 +2330,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
             Get-ChildItem $path -EA 0 | ForEach-Object {
                 $props = Get-ItemProperty $_.PSPath -EA 0
                 if ($props.DisplayName -match 'OneNote') {
-                    Write-Host "    Nuking: $($props.DisplayName)" -ForegroundColor DarkGray
+                    Write-Log "    Nuking: $($props.DisplayName)" "INFO"
                     $script:counters.OfficeRemoved++
                     # Try MSI uninstall
                     $guid = $_.PSChildName
@@ -2361,10 +2361,10 @@ if (-not (Test-PhaseEnabled 'Office')) {
                            (Test-Path "C:\Program Files\Common Files\microsoft shared\ClickToRun")
 
         if ($officeInstalled) {
-            Write-Host "  Office detected - nuking..." -ForegroundColor Cyan
+            Write-Log "  Office detected - nuking..." "INFO"
 
             # Kill ALL Office processes
-            Write-Host "  Killing Office processes..." -ForegroundColor Gray
+            Write-Log "  Killing Office processes..." "INFO"
             $officeProcs = @(
                 'WINWORD','EXCEL','POWERPNT','OUTLOOK','ONENOTE','MSACCESS','MSPUB','VISIO','WINPROJ',
                 'lync','Teams','OfficeClickToRun','OfficeC2RClient','AppVShNotify',
@@ -2378,7 +2378,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
             $officeProcs | ForEach-Object { Get-Process -Name $_ -EA 0 | Stop-Process -Force -EA 0 }
 
             # Stop and delete Office services
-            Write-Host "  Nuking Office services..." -ForegroundColor Gray
+            Write-Log "  Nuking Office services..." "INFO"
             @('ClickToRunSvc','OfficeSvc','ose','ose64','osppsvc') | ForEach-Object {
                 Stop-Service -Name $_ -Force -EA 0
                 Set-Service -Name $_ -StartupType Disabled -EA 0
@@ -2387,7 +2387,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
             }
 
             # Delete Office scheduled tasks
-            Write-Host "  Nuking Office scheduled tasks..." -ForegroundColor Gray
+            Write-Log "  Nuking Office scheduled tasks..." "INFO"
             Get-ScheduledTask -TaskPath "\Microsoft\Office\*" -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA 0
             @(
                 'Office Automatic Updates*','Office ClickToRun*','Office Feature Updates*',
@@ -2398,7 +2398,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
             }
 
             # Nuclear file deletion
-            Write-Host "  Nuking Office folders..." -ForegroundColor Gray
+            Write-Log "  Nuking Office folders..." "INFO"
             @(
                 "C:\Program Files\Microsoft Office",
                 "C:\Program Files\Microsoft Office 15",
@@ -2435,7 +2435,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
             }
 
             # Nuclear registry cleanup
-            Write-Host "  Nuking Office registry..." -ForegroundColor Gray
+            Write-Log "  Nuking Office registry..." "INFO"
             @(
                 "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun",
                 "HKLM:\SOFTWARE\Microsoft\Office\15.0",
@@ -2463,7 +2463,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
             }
 
             # Clean Office shortcuts
-            Write-Host "  Nuking Office shortcuts..." -ForegroundColor Gray
+            Write-Log "  Nuking Office shortcuts..." "INFO"
             @(
                 "$env:ProgramData\Microsoft\Windows\Start Menu\Programs",
                 "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
@@ -2479,17 +2479,17 @@ if (-not (Test-PhaseEnabled 'Office')) {
             }
 
             # Clean Office licenses (Office-only; do NOT touch Windows product key)
-            Write-Host "  Cleaning Office licenses..." -ForegroundColor Gray
+            Write-Log "  Cleaning Office licenses..." "INFO"
             Get-WmiObject -Query "SELECT * FROM SoftwareLicensingProduct WHERE ApplicationId='0ff1ce15-a989-479d-af46-f275c6370663' AND PartialProductKey IS NOT NULL" -EA 0 | ForEach-Object {
                 $_.UninstallProductKey($_.ProductKeyID) 2>$null
             }
 
-            Write-Host "  Office nuclear removal complete" -ForegroundColor Green
+            Write-Log "  Office nuclear removal complete" "SUCCESS"
         } else {
-            Write-Host "  Office not detected - skipping" -ForegroundColor Gray
+            Write-Log "  Office not detected - skipping" "INFO"
         }
     } else {
-        Write-Host "  [DRY RUN] Would perform full Office nuclear removal" -ForegroundColor Cyan
+        Write-Log "  [DRY RUN] Would perform full Office nuclear removal" "INFO"
     }
 }
 
@@ -2498,7 +2498,7 @@ if (-not (Test-PhaseEnabled 'Office')) {
 # ============================================================================
 Update-Phase "Service Cleanup"
 if (Test-PhaseEnabled 'Services') {
-Write-Host "`n[Cleanup] Disabling bloatware services..." -ForegroundColor Yellow
+Write-Log "[Cleanup] Disabling bloatware services..." "SECTION"
 
 # Allow config file to override the service list
 $servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable')) { $script:configOverrides.ServicesToDisable } else { @(
@@ -2589,13 +2589,13 @@ foreach ($baseName in $perUserServices) {
     }
 }
 
-Write-Host "  Bloatware services disabled" -ForegroundColor Green
+Write-Log "  Bloatware services disabled" "SUCCESS"
 } else { Write-Log "[Services] SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
 # TEMP FILE CLEANUP
 # ============================================================================
-Write-Host "`n[Cleanup] Clearing temp files..." -ForegroundColor Yellow
+Write-Log "[Cleanup] Clearing temp files..." "SECTION"
 
 if (-not $DryRun) {
     # System temp
@@ -2618,10 +2618,10 @@ if (-not $DryRun) {
     # Delivery Optimization cache
     Remove-Item "C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\*" -Recurse -Force -EA 0
 } else {
-    Write-Host "  [DRY RUN] Would clear temp, prefetch, WU cache, and delivery optimization cache" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would clear temp, prefetch, WU cache, and delivery optimization cache" "INFO"
 }
 
-Write-Host "  Temp files cleared" -ForegroundColor Green
+Write-Log "  Temp files cleared" "SUCCESS"
 
 # ============================================================================
 # PHASE 5: EDGE DEBLOAT
@@ -2640,7 +2640,7 @@ $edgePolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
 if (!(Test-Path $edgePolicyPath)) { New-Item -Path $edgePolicyPath -Force | Out-Null }
 
 # Edge Telemetry & Data Collection
-Write-Host "  Disabling Edge telemetry..." -ForegroundColor Gray
+Write-Log "  Disabling Edge telemetry..." "INFO"
 @{
     "DiagnosticData" = 0; "MetricsReportingEnabled" = 0; "PersonalizationReportingEnabled" = 0
     "SendSiteInfoToImproveServices" = 0; "Edge3PSerpTelemetryEnabled" = 0
@@ -2649,7 +2649,7 @@ Write-Host "  Disabling Edge telemetry..." -ForegroundColor Gray
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge Copilot & AI
-Write-Host "  Disabling Edge Copilot & AI..." -ForegroundColor Gray
+Write-Log "  Disabling Edge Copilot & AI..." "INFO"
 @{
     "HubsSidebarEnabled" = 0; "EdgeCopilotEnabled" = 0; "CopilotPageContext" = 0
     "CopilotCDPPageContext" = 0; "Microsoft365CopilotChatIconEnabled" = 0
@@ -2662,7 +2662,7 @@ Write-Host "  Disabling Edge Copilot & AI..." -ForegroundColor Gray
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge Shopping & Promotions
-Write-Host "  Disabling Edge shopping & promotions..." -ForegroundColor Gray
+Write-Log "  Disabling Edge shopping & promotions..." "INFO"
 @{
     "EdgeShoppingAssistantEnabled" = 0; "EdgeWalletEnabled" = 0; "EdgeWalletCheckoutEnabled" = 0
     "ShowMicrosoftRewards" = 0; "ShowRecommendationsEnabled" = 0
@@ -2672,7 +2672,7 @@ Write-Host "  Disabling Edge shopping & promotions..." -ForegroundColor Gray
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge New Tab & UI
-Write-Host "  Configuring Edge new tab & UI..." -ForegroundColor Gray
+Write-Log "  Configuring Edge new tab & UI..." "INFO"
 @{
     "NewTabPageContentEnabled" = 0; "NewTabPageHideDefaultTopSites" = 1
     "NewTabPageNewsEnabled" = 0; "NewTabPageQuickLinksEnabled" = 0
@@ -2682,21 +2682,21 @@ Write-Host "  Configuring Edge new tab & UI..." -ForegroundColor Gray
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge Performance
-Write-Host "  Configuring Edge performance..." -ForegroundColor Gray
+Write-Log "  Configuring Edge performance..." "INFO"
 @{
     "StartupBoostEnabled" = 0; "BackgroundModeEnabled" = 0
     "SleepingTabsEnabled" = 1; "HardwareAccelerationModeEnabled" = 1
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge Sync & Sign-In
-Write-Host "  Disabling Edge sync & sign-in..." -ForegroundColor Gray
+Write-Log "  Disabling Edge sync & sign-in..." "INFO"
 @{
     "SyncDisabled" = 1; "BrowserSignin" = 0; "ImplicitSignInEnabled" = 0
     "SignInCtaOnNtpEnabled" = 0; "LinkedAccountEnabled" = 0
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge Privacy
-Write-Host "  Configuring Edge privacy..." -ForegroundColor Gray
+Write-Log "  Configuring Edge privacy..." "INFO"
 @{
     "TrackingPrevention" = 3; "ConfigureDoNotTrack" = 1; "BlockThirdPartyCookies" = 1
     "DefaultGeolocationSetting" = 2; "DefaultNotificationsSetting" = 2
@@ -2706,7 +2706,7 @@ Write-Host "  Configuring Edge privacy..." -ForegroundColor Gray
 }.GetEnumerator() | ForEach-Object { Set-Reg -Path $edgePolicyPath -Name $_.Key -Value $_.Value }
 
 # Edge First Run & Homepage
-Write-Host "  Configuring Edge first run & homepage..." -ForegroundColor Gray
+Write-Log "  Configuring Edge first run & homepage..." "INFO"
 @{
     "HideFirstRunExperience" = 1; "PreventFirstRunPage" = 1
     "ShowBrowserMigrationPrompt" = 0; "AutoImportAtFirstRun" = 0
@@ -2727,20 +2727,20 @@ if (!(Test-Path $startupUrlsPath)) { New-Item -Path $startupUrlsPath -Force | Ou
 Set-Reg -Path $startupUrlsPath -Name "1" -Value "https://www.google.com" -Type "String"
 
 # Force install uBlock Origin
-Write-Host "  Installing uBlock Origin..." -ForegroundColor Gray
+Write-Log "  Installing uBlock Origin..." "INFO"
 $forcelistPath = "$edgePolicyPath\ExtensionInstallForcelist"
 if (!(Test-Path $forcelistPath)) { New-Item -Path $forcelistPath -Force | Out-Null }
 Set-Reg -Path $forcelistPath -Name "1" -Value "odfafepnkmbhccpbejgmiehpchacaeak;https://edge.microsoft.com/extensionwebstorebase/v1/crx" -Type "String"
 
 # Configure Edge bookmarks (Maven support links)
 if (-not $DryRun) {
-    Write-Host "  Configuring Edge bookmarks..." -ForegroundColor Gray
+    Write-Log "  Configuring Edge bookmarks..." "INFO"
     $edgeUserData = "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
 
     # Check if Edge profile exists, if not create it by launching Edge
     $edgeProfileExists = (Test-Path "$edgeUserData\Default\Bookmarks") -or (Test-Path "$edgeUserData\Profile 1\Bookmarks")
     if (-not $edgeProfileExists) {
-        Write-Host "  Creating Edge profile..." -ForegroundColor Gray
+        Write-Log "  Creating Edge profile..." "INFO"
         $edgePath = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
         if (-not (Test-Path $edgePath)) { $edgePath = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe" }
 
@@ -2823,7 +2823,7 @@ if (-not $DryRun) {
     }
 }
 
-Write-Host "  Edge configured" -ForegroundColor Green
+Write-Log "  Edge configured" "SUCCESS"
 } else { Write-Log "[Phase 5/7] Edge SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
@@ -2835,7 +2835,7 @@ Write-Log "[Phase 6/7] Importing Maven firewall rules..." "SECTION"
 
 if (-not $DryRun) {
     # Enable firewall on all profiles
-    Write-Host "  Enabling Windows Firewall..." -ForegroundColor Gray
+    Write-Log "  Enabling Windows Firewall..." "INFO"
     Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -EA 0
 
     # Firewall rules CSV data
@@ -2864,7 +2864,7 @@ Chrome-Out	Google Chrome	Outbound	Allow	Any	Any	Any	C:\program files\google\chro
 Chrome-mDNS-In	Google Chrome mDNS	Inbound	Allow	UDP	5353	Any	C:\Program Files\Google\Chrome\Application\chrome.exe
 "@
 
-    Write-Host "  Importing firewall rules..." -ForegroundColor Gray
+    Write-Log "  Importing firewall rules..." "INFO"
     $rules = $firewallCsv | ConvertFrom-Csv -Delimiter "`t"
     $successCount = 0
 
@@ -2892,9 +2892,9 @@ Chrome-mDNS-In	Google Chrome mDNS	Inbound	Allow	UDP	5353	Any	C:\Program Files\Go
         } catch { }
     }
 
-    Write-Host "  Imported $successCount firewall rules" -ForegroundColor Green
+    Write-Log "  Imported $successCount firewall rules" "SUCCESS"
 } else {
-    Write-Host "  [DRY RUN] Would import 21 firewall rules" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would import 21 firewall rules" "INFO"
 }
 } else { Write-Log "[Phase 6/7] Firewall SKIPPED (phase excluded)" "INFO" }
 
@@ -2907,7 +2907,7 @@ Write-Log "[Phase 7/7] Running privacy cleanup..." "SECTION"
 
 if (-not $DryRun) {
     # Clear browser caches
-    Write-Host "  Clearing browser caches..." -ForegroundColor Gray
+    Write-Log "  Clearing browser caches..." "INFO"
     @(
         "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache",
         "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache",
@@ -2919,31 +2919,31 @@ if (-not $DryRun) {
     }
 
     # Clear diagnostics logs
-    Write-Host "  Clearing diagnostics logs..." -ForegroundColor Gray
+    Write-Log "  Clearing diagnostics logs..." "INFO"
     Remove-Item "$env:ProgramData\Microsoft\Diagnosis\*" -Recurse -Force -EA 0
     Remove-Item "$env:LOCALAPPDATA\Diagnostics\*" -Recurse -Force -EA 0
 
     # Clear thumbnail cache
-    Write-Host "  Clearing thumbnail cache..." -ForegroundColor Gray
+    Write-Log "  Clearing thumbnail cache..." "INFO"
     Remove-Item "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\*.db" -Force -EA 0
 
     # Clear recent files
-    Write-Host "  Clearing recent files..." -ForegroundColor Gray
+    Write-Log "  Clearing recent files..." "INFO"
     Remove-Item "$env:APPDATA\Microsoft\Windows\Recent\*" -Force -Recurse -EA 0
     Remove-Item "$env:APPDATA\Microsoft\Windows\Recent\AutomaticDestinations\*" -Force -EA 0
     Remove-Item "$env:APPDATA\Microsoft\Windows\Recent\CustomDestinations\*" -Force -EA 0
 
     # Clear event logs
-    Write-Host "  Clearing event logs..." -ForegroundColor Gray
+    Write-Log "  Clearing event logs..." "INFO"
     wevtutil el 2>$null | ForEach-Object { wevtutil cl "$_" 2>$null }
 } else {
-    Write-Host "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, recent files, event logs" -ForegroundColor Cyan
+    Write-Log "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, recent files, event logs" "INFO"
 }
 
 # Disable app usage tracking
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Start_TrackProgs" -Value 0
 
-Write-Host "  Privacy cleanup complete" -ForegroundColor Green
+Write-Log "  Privacy cleanup complete" "SUCCESS"
 } else { Write-Log "[Phase 7/7] Privacy SKIPPED (phase excluded)" "INFO" }
 
 # Complete progress bar
@@ -2954,32 +2954,32 @@ if (-not $Silent -and [Environment]::UserInteractive) {
 # ============================================================================
 # POST-DEBLOAT: RE-ENABLE ESSENTIAL SERVICES
 # ============================================================================
-Write-Host "`n[Post-Debloat] Re-enabling essential services..." -ForegroundColor Yellow
+Write-Log "[Post-Debloat] Re-enabling essential services..." "SECTION"
 
 if (-not $DryRun) {
     # Windows Update
-    Write-Host "  Re-enabling Windows Update..." -ForegroundColor Gray
+    Write-Log "  Re-enabling Windows Update..." "INFO"
     Set-Service -Name 'wuauserv' -StartupType Manual -EA 0
     Start-Service -Name 'wuauserv' -EA 0
 
     # Windows Search
-    Write-Host "  Re-enabling Windows Search..." -ForegroundColor Gray
+    Write-Log "  Re-enabling Windows Search..." "INFO"
     Set-Service -Name 'WSearch' -StartupType Automatic -EA 0
     Start-Service -Name 'WSearch' -EA 0
 }
 
-Write-Host "  Services re-enabled" -ForegroundColor Green
+Write-Log "  Services re-enabled" "SUCCESS"
 
 # ============================================================================
 # RESTART EXPLORER (Apply UI changes immediately)
 # ============================================================================
-Write-Host "`n[Finalizing] Restarting Explorer..." -ForegroundColor Yellow
+Write-Log "[Finalizing] Restarting Explorer..." "SECTION"
 if (-not $DryRun) {
     Stop-Process -Name explorer -Force -EA 0
     Start-Sleep -Seconds 2
     Start-Process explorer.exe
 }
-Write-Host "  Explorer restarted" -ForegroundColor Green
+Write-Log "  Explorer restarted" "SUCCESS"
 
 # ============================================================================
 # WRITE UNDO MANIFEST
