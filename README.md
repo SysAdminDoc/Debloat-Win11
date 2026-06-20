@@ -61,11 +61,25 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ### New in v2.0.0
 - ✅ Real `-UndoFile` mode replays a manifest to reverse a prior run
 - ✅ Per-phase `-Only` / `-Skip` flags for surgical runs
-- ✅ Config file support (`-ConfigPath .\debloat.psd1`)
+- ✅ Config file support (`-ConfigPath`) with presets (corporate, developer, medical, kiosk)
 - ✅ Progress bar in interactive mode; `-Silent` suppresses console output
 - ✅ Smart Office detection (ClickToRun, standalone, running processes)
 - ✅ Parallel service disable on PowerShell 7+
-- ✅ 26H1+ AI controls (Click to Do, Settings Agent, Agent Workspaces)
+- ✅ 26H1+ AI controls (Click to Do, Settings Agent, Agent Workspaces, M365 Copilot)
+- ✅ `-Explain` mode prints rationale for each phase without making changes
+- ✅ `-RestoreApp` reinstalls a removed package via winget
+- ✅ `-DiffManifests` compares two undo manifests side-by-side
+- ✅ `-WimPath` offline image debloat (DISM-based, for sysprep/MDT/WDS)
+- ✅ Enterprise LTSC edition detection (skips consumer-only phases)
+- ✅ S Mode and Tamper Protection pre-flight detection
+- ✅ Windows EventLog integration for SIEM forwarding
+- ✅ Post-update maintenance task (re-applies privacy tweaks after Windows Update)
+- ✅ Self-contained HTML report (Catppuccin dark theme)
+- ✅ Crash dump collection for bug reports
+- ✅ winget upgrade phase for surviving apps
+- ✅ Fresh-OOBE mode (suppresses setup prompts for new user profiles)
+- ✅ Intel chipset driver safeguard in OEM cleanup
+- ✅ Pester test suite + GitHub Actions CI
 
 ### v1.1.0
 - ✅ Configurable log path (`-LogDir`)
@@ -77,6 +91,9 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 
 ### Detection & Safety
 - ✅ Windows version verification
+- ✅ Enterprise LTSC/IoT edition detection
+- ✅ Windows S Mode detection (aborts with message)
+- ✅ Tamper Protection status check
 - ✅ Domain-joined awareness
 - ✅ Disk space check
 - ✅ Pending reboot detection
@@ -186,6 +203,18 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 # Combine flags
 .\Debloat-Win11.ps1 -DryRun -LogDir "D:\Logs" -SkipOfficeRemoval
+
+# Explain mode - show rationale for each phase without making changes
+.\Debloat-Win11.ps1 -Explain
+
+# Restore a removed app via winget
+.\Debloat-Win11.ps1 -RestoreApp "Microsoft.WindowsCamera"
+
+# Compare two undo manifests
+.\Debloat-Win11.ps1 -DiffManifests "manifest1.json","manifest2.json"
+
+# Offline WIM image debloat (for sysprep/MDT)
+.\Debloat-Win11.ps1 -WimPath "D:\sources\install.wim" -WimIndex 1
 ```
 
 ### Option 2: One-Liner
