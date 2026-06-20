@@ -24,7 +24,8 @@ param(
     [string]$WimPath,
     [int]$WimIndex = 1,
     [string]$MountDir = "C:\Debloat-WIM-Mount",
-    [switch]$CheckDrift
+    [switch]$CheckDrift,
+    [switch]$AllUsers
 )
 
 # ============================================================================

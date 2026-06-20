@@ -1051,3 +1051,68 @@ if (-not $DryRun) {
 }
 
 Write-Log "  Optional features configured" "SUCCESS"
+
+# ============================================================================
+# ALL-USERS HKCU PROPAGATION (when -AllUsers is set)
+# ============================================================================
+if ($AllUsers -and -not $DryRun) {
+    Write-Log "[AllUsers] Applying HKCU tweaks to all user profiles..." "SECTION"
+
+    $hkcuTweaks = @(
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\SearchSettings'; Name = 'IsDynamicSearchBoxEnabled'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarAl'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowTaskViewButton'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarDa'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarMn'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'HideFileExt'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Hidden'; Value = 1 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_IrisRecommendations'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_AccountNotifications'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'LaunchTo'; Value = 1 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'AppsUseLightTheme'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'SystemUsesLightTheme'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer'; Name = 'ShowRecent'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer'; Name = 'ShowFrequent'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement'; Name = 'ScoobeSystemSettingEnabled'; Value = 0 }
+        @{ Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Value = 1 }
+        @{ Path = 'SOFTWARE\Microsoft\Siuf\Rules'; Name = 'NumberOfSIUFInPeriod'; Value = 0 }
+        @{ Path = 'SOFTWARE\Microsoft\InputPersonalization'; Name = 'RestrictImplicitTextCollection'; Value = 1 }
+        @{ Path = 'SOFTWARE\Microsoft\InputPersonalization'; Name = 'RestrictImplicitInkCollection'; Value = 1 }
+    )
+
+    $cdmKeys = @('SystemPaneSuggestionsEnabled', 'SubscribedContent-310093Enabled', 'SubscribedContent-338387Enabled',
+      'SubscribedContent-338388Enabled', 'SubscribedContent-338389Enabled', 'SubscribedContent-338393Enabled',
+      'SubscribedContent-353694Enabled', 'SubscribedContent-353696Enabled', 'SubscribedContent-353698Enabled',
+      'SilentInstalledAppsEnabled', 'SoftLandingEnabled', 'ContentDeliveryAllowed',
+      'OemPreInstalledAppsEnabled', 'PreInstalledAppsEnabled', 'FeatureManagementEnabled')
+    foreach ($key in $cdmKeys) {
+        $hkcuTweaks += @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = $key; Value = 0 }
+    }
+
+    $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default User|All Users)$' }
+    $appliedCount = 0
+    foreach ($userProf in $userProfiles) {
+        $ntuser = "$($userProf.FullName)\NTUSER.DAT"
+        if (!(Test-Path $ntuser)) { continue }
+
+        $hiveName = "HKU\AllUsers_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
+        reg load $hiveName $ntuser 2>$null
+        if ($LASTEXITCODE -ne 0) { continue }
+
+        foreach ($tweak in $hkcuTweaks) {
+            reg add "$hiveName\$($tweak.Path)" /v $tweak.Name /t REG_DWORD /d $tweak.Value /f 2>$null | Out-Null
+        }
+
+        [gc]::Collect()
+        Start-Sleep -Milliseconds 200
+        reg unload $hiveName 2>$null
+        $appliedCount++
+    }
+    Write-Log "  Applied HKCU tweaks to $appliedCount user profiles" "SUCCESS"
+} elseif ($AllUsers -and $DryRun) {
+    $profileCount = (Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default User|All Users)$' }).Count
+    Write-Log "  [DRY RUN] Would apply HKCU tweaks to $profileCount user profiles" "INFO"
+}

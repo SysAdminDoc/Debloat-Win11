@@ -186,7 +186,7 @@ Describe 'No Duplicate ContentDeliveryManager Writes' {
 
         foreach ($key in $cdmKeys) {
             $count = ([regex]::Matches($allContent, [regex]::Escape($key))).Count
-            $count | Should -BeLessOrEqual 2 -Because "$key should appear at most twice (HKCU Set-Reg + Default user reg add)"
+            $count | Should -BeLessOrEqual 3 -Because "$key should appear at most 3 times (HKCU Set-Reg + Default user reg add + AllUsers propagation)"
         }
     }
 }
