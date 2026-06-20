@@ -18,41 +18,44 @@
 
 @{
     # AppX packages to remove (wildcard patterns)
+    # Risk: Safe -- consumer apps, no system dependencies
     # Uncomment and modify to override the built-in list
     # RemovePatterns = @(
-    #     '*Clipchamp*',
-    #     '*Microsoft.BingNews*',
-    #     '*Microsoft.BingSports*',
-    #     '*Microsoft.BingWeather*',
-    #     '*Microsoft.BingSearch*',
-    #     '*Microsoft.GamingApp*',
-    #     '*Microsoft.GetHelp*',
-    #     '*Microsoft.Getstarted*',
-    #     '*Microsoft.MicrosoftSolitaireCollection*',
-    #     '*Microsoft.People*',
-    #     '*Microsoft.WindowsFeedbackHub*',
-    #     '*Microsoft.ZuneMusic*',
-    #     '*Microsoft.ZuneVideo*',
-    #     '*Disney*',
-    #     '*Spotify*',
-    #     '*Facebook*',
-    #     '*TikTok*',
-    #     '*Netflix*'
+    #     '*Clipchamp*',              # Safe: video editor
+    #     '*Microsoft.BingNews*',     # Safe: consumer news
+    #     '*Microsoft.BingSports*',   # Safe: consumer sports
+    #     '*Microsoft.BingWeather*',  # Safe: consumer weather
+    #     '*Microsoft.BingSearch*',   # Safe: Bing integration
+    #     '*Microsoft.GamingApp*',    # Safe: Xbox companion
+    #     '*Microsoft.GetHelp*',      # Safe: help app
+    #     '*Microsoft.Getstarted*',   # Safe: tips app
+    #     '*Microsoft.MicrosoftSolitaireCollection*',  # Safe: games
+    #     '*Microsoft.People*',       # Safe: contacts (may break Mail)
+    #     '*Microsoft.WindowsFeedbackHub*',  # Safe: feedback
+    #     '*Microsoft.ZuneMusic*',    # Safe: Groove Music
+    #     '*Microsoft.ZuneVideo*',    # Safe: Movies & TV
+    #     '*Disney*',                 # Safe: third-party
+    #     '*Spotify*',                # Safe: third-party
+    #     '*Facebook*',               # Safe: third-party
+    #     '*TikTok*',                 # Safe: third-party
+    #     '*Netflix*'                 # Safe: third-party
     # )
 
     # Services to disable
+    # Risk: Caution -- disabling the wrong service can break functionality
     # Uncomment and modify to override the built-in list
     # ServicesToDisable = @(
-    #     'DiagTrack',
-    #     'dmwappushservice',
-    #     'DPS',
-    #     'WerSvc',
-    #     'MapsBroker',
-    #     'Fax',
-    #     'RemoteRegistry'
+    #     'DiagTrack',       # Safe: telemetry
+    #     'dmwappushservice', # Safe: WAP push
+    #     'DPS',             # Caution: disables auto-troubleshooting
+    #     'WerSvc',          # Safe: error reporting to Microsoft
+    #     'MapsBroker',      # Safe: offline maps
+    #     'Fax',             # Safe: fax service
+    #     'RemoteRegistry'   # Safe: security improvement
     # )
 
     # Defender folder exclusions
+    # Risk: Caution -- excluded paths bypass real-time scanning
     # Default is empty -- add paths specific to your deployment
     # DefenderExclusions = @(
     #     "C:\images",
@@ -67,6 +70,7 @@
     # )
 
     # Startup bloat entries to remove from registry Run keys (wildcard patterns)
+    # Risk: Safe -- only affects auto-start, apps still launchable manually
     # Default removes Spotify, Discord, Steam, Adobe, etc. while preserving Teams/Zoom/Slack
     # StartupBloat = @(
     #     'Spotify',
@@ -82,6 +86,7 @@
     # )
 
     # Scheduled tasks to disable (task names, wildcards supported)
+    # Risk: Safe -- telemetry/diagnostic tasks; Caution for Edge update tasks (stops auto-updates)
     # Default disables Xbox, Edge update, telemetry, CEIP, feedback, maps tasks
     # TasksToDisable = @(
     #     'XblGameSaveTask',
@@ -93,14 +98,15 @@
     # )
 
     # Windows optional features to disable
+    # Risk: Safe for SMB1/PS v2/IE (security improvements); Caution for WMP (some apps depend on it)
     # Default disables IE, PS v2, WMP, XPS, SMB1, Work Folders
     # FeaturesToDisable = @(
-    #     'Internet-Explorer-Optional-amd64',
-    #     'MicrosoftWindowsPowerShellV2Root',
-    #     'MicrosoftWindowsPowerShellV2',
-    #     'SMB1Protocol',
-    #     'SMB1Protocol-Client',
-    #     'SMB1Protocol-Server'
+    #     'Internet-Explorer-Optional-amd64',   # Safe: security risk
+    #     'MicrosoftWindowsPowerShellV2Root',   # Safe: security risk
+    #     'MicrosoftWindowsPowerShellV2',       # Safe: security risk
+    #     'SMB1Protocol',                        # Safe: security risk
+    #     'SMB1Protocol-Client',                 # Safe: security risk
+    #     'SMB1Protocol-Server'                  # Safe: security risk
     # )
 
     # Firewall rules (tab-delimited CSV string with header row)

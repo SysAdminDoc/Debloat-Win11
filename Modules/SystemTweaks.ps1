@@ -933,7 +933,32 @@ if (-not $DryRun) {
 # ============================================================================
 Write-Log "[Context Menu] Removing bloat entries..." "SECTION"
 
+# Back up context menu keys to a .reg file for undoable restoration
+$contextMenuBackup = "$LogDir\ContextMenu-Backup-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').reg"
+$contextMenuKeys = @(
+    'HKCR\*\shellex\ContextMenuHandlers\ModernSharing',
+    'HKCR\*\shellex\ContextMenuHandlers\Sharing',
+    'HKCR\Folder\ShellEx\ContextMenuHandlers\Library Location',
+    'HKCR\*\shell\pintohomefile',
+    'HKCR\exefile\shellex\ContextMenuHandlers\Compatibility'
+)
 if (-not $DryRun) {
+    foreach ($key in $contextMenuKeys) {
+        reg export $key "$env:TEMP\ctx_export.reg" /y 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            if (Test-Path $contextMenuBackup) {
+                Get-Content "$env:TEMP\ctx_export.reg" | Select-Object -Skip 1 | Add-Content $contextMenuBackup
+            } else {
+                Copy-Item "$env:TEMP\ctx_export.reg" $contextMenuBackup -Force
+            }
+        }
+        Remove-Item "$env:TEMP\ctx_export.reg" -Force -EA 0
+    }
+    if (Test-Path $contextMenuBackup) {
+        $script:manifest.changes.registry_deleted.Add("BACKUP: $contextMenuBackup") | Out-Null
+        Write-Log "  Context menu backup: $contextMenuBackup" "INFO"
+    }
+
     @(
         'HKLM\SOFTWARE\Classes\SystemFileAssociations\*\Shell\3D Edit',
         'HKCR\*\shellex\ContextMenuHandlers\ModernSharing',
@@ -987,6 +1012,8 @@ if (-not $DryRun) {
         "$env:APPDATA\Microsoft\Windows\SendTo\Bluetooth File Transfer.LNK",
         "$env:APPDATA\Microsoft\Windows\SendTo\Fax Recipient.lnk"
     ) | ForEach-Object { if (Test-Path $_) { Remove-Item $_ -Force -EA 0 } }
+} else {
+    Write-Log "  [DRY RUN] Would remove context menu bloat entries" "INFO"
 }
 
 Write-Log "  Context menu cleaned" "SUCCESS"

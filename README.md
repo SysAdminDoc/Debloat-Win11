@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.1.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.2.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.1.0
+**Version:** v2.2.0
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -58,7 +58,7 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 
 ## Features at a Glance
 
-### New in v2.1.0
+### New in v2.2.0
 - ✅ `-CheckDrift` mode reports registry values reset by Windows Update
 - ✅ `-AllUsers` flag applies HKCU tweaks to all user profiles (Intune/SCCM SYSTEM-level deployment)
 - ✅ Standalone revert script (`.ps1`) generated alongside JSON manifest for portable undo
@@ -265,7 +265,7 @@ $encoded = [Convert]::ToBase64String($bytes)
 
 ## Execution Phases
 
-The script runs in 7 distinct phases plus pre/post operations:
+The script runs in 12 configurable phases (selectable via `-Only` / `-Skip`) plus pre/post operations:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
