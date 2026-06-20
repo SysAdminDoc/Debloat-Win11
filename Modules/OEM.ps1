@@ -199,7 +199,7 @@ if (-not $DryRun) {
 
 # Disabling bloat scheduled tasks
 Write-Log "  Disabling bloat scheduled tasks..." "INFO"
-$tasksToDisable = @(
+$tasksToDisable = if ($script:configOverrides.ContainsKey('TasksToDisable')) { $script:configOverrides.TasksToDisable } else { @(
     # Xbox
     'XblGameSaveTask',
     # Edge
@@ -243,7 +243,7 @@ $tasksToDisable = @(
     'SpeechModelDownloadTask',
     # App prelaunch
     'Pre-staged app cleanup'
-)
+) }
 # Only disable OneDrive tasks if OneDrive not in use
 if (-not $script:onedriveInUse) {
     $tasksToDisable += @('OneDrive Reporting Task*', 'OneDrive Standalone Update Task*', 'OneDrive Startup Task*')

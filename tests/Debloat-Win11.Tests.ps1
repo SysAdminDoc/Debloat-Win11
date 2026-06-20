@@ -259,4 +259,41 @@ Describe 'Config Override Mechanism' {
     It 'checks configOverrides for EdgeBookmarks' {
         $allContent | Should -Match "configOverrides\.ContainsKey\('EdgeBookmarks'\)"
     }
+
+    It 'checks configOverrides for StartupBloat' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('StartupBloat'\)"
+    }
+
+    It 'checks configOverrides for TasksToDisable' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('TasksToDisable'\)"
+    }
+
+    It 'checks configOverrides for FeaturesToDisable' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('FeaturesToDisable'\)"
+    }
+
+    It 'checks configOverrides for FirewallRules' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('FirewallRules'\)"
+    }
+}
+
+Describe 'No Duplicate AppX Patterns' {
+    It 'has no duplicate patterns in defaultRemovePatterns' {
+        $patternLines = $scriptContent -split "`n" | Where-Object { $_ -match "^\s*'\*[^']+\*'" }
+        $patterns = $patternLines | ForEach-Object { ($_ -replace "^\s*'([^']+)'.*$", '$1').Trim() }
+        $grouped = $patterns | Group-Object | Where-Object { $_.Count -gt 1 }
+        $grouped | Should -BeNullOrEmpty -Because "each AppX pattern should appear exactly once in defaultRemovePatterns"
+    }
+}
+
+Describe 'AI Controls' {
+    It 'disables IsoEnvBroker for Agent Workspaces' {
+        $allContent | Should -Match 'IsoEnvBroker'
+    }
+
+    It 'disables Paint AI features' {
+        $allContent | Should -Match 'DisableImageCreator'
+        $allContent | Should -Match 'DisableGenerativeFill'
+        $allContent | Should -Match 'DisableCocreator'
+    }
 }

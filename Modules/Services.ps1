@@ -36,6 +36,7 @@ $servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable'
     'OneSyncSvc',                   # Sync Host
     'lmhosts',                      # TCP/IP NetBIOS Helper
     'WSAIFabricSvc',                # Windows AI Fabric Service (Recall, AI Search)
+    'IsoEnvBroker',                 # Isolated Environment Broker (Agent Workspaces)
 
     # Other Bloat
     'lfsvc',                        # Geolocation

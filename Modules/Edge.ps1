@@ -108,7 +108,7 @@ $forcelistPath = "$edgePolicyPath\ExtensionInstallForcelist"
 if (!(Test-Path $forcelistPath)) { New-Item -Path $forcelistPath -Force | Out-Null }
 Set-Reg -Path $forcelistPath -Name "1" -Value "odfafepnkmbhccpbejgmiehpchacaeak;https://edge.microsoft.com/extensionwebstorebase/v1/crx" -Type "String"
 
-# Configure Edge bookmarks (Maven support links)
+# Configure Edge bookmarks (default: Google only; use -ConfigPath to add vendor links)
 if (-not $DryRun) {
     Write-Log "  Configuring Edge bookmarks..." "INFO"
     $edgeUserData = "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
@@ -191,7 +191,9 @@ if (-not $DryRun) {
                         $json = $content | ConvertTo-Json -Depth 100
                         [System.IO.File]::WriteAllText($bookmarksFile, $json, [System.Text.Encoding]::UTF8)
                     }
-                } catch { }
+                } catch {
+                    Write-Log "  Failed to configure bookmarks for $($userProf.Name): $_" "ERROR"
+                }
             }
         }
     }

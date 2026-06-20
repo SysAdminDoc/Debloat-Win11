@@ -6,13 +6,8 @@
 Write-Log "[Phase 6/7] Importing firewall rules..." "SECTION"
 Write-Rationale 'Firewall'
 
-if (-not $DryRun) {
-    # Enable firewall on all profiles
-    Write-Log "  Enabling Windows Firewall..." "INFO"
-    Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -EA 0
-
-    # Default: File and Printer Sharing rules only. Use -ConfigPath for vendor-specific rules.
-    $firewallCsv = @"
+# Default: File and Printer Sharing rules. Use -ConfigPath with FirewallRules key to override.
+$firewallCsv = if ($script:configOverrides.ContainsKey('FirewallRules')) { $script:configOverrides.FirewallRules } else { @"
 Name	DisplayName	Direction	Action	Protocol	LocalPort	RemotePort	Program
 FPS-NB_Datagram-In-UDP	File and Printer Sharing (NB-Datagram-In)	Inbound	Allow	UDP	138	Any	System
 FPS-NB_Name-Out-UDP	File and Printer Sharing (NB-Name-Out)	Outbound	Allow	UDP	Any	137	System
@@ -24,15 +19,19 @@ FPS-NB_Session-Out-TCP	File and Printer Sharing (NB-Session-Out)	Outbound	Allow	
 FPS-NB_Datagram-Out-UDP	File and Printer Sharing (NB-Datagram-Out)	Outbound	Allow	UDP	Any	138	System
 FPS-LLMNR-In-UDP	File and Printer Sharing (LLMNR-UDP-In)	Inbound	Allow	UDP	5355	Any	System
 FPS-LLMNR-Out-UDP	File and Printer Sharing (LLMNR-UDP-Out)	Outbound	Allow	UDP	Any	5355	System
-"@
+"@ }
+
+$rules = $firewallCsv | ConvertFrom-Csv -Delimiter "`t"
+
+if (-not $DryRun) {
+    Write-Log "  Enabling Windows Firewall..." "INFO"
+    Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True -EA 0
 
     Write-Log "  Importing firewall rules..." "INFO"
-    $rules = $firewallCsv | ConvertFrom-Csv -Delimiter "`t"
     $successCount = 0
 
     foreach ($rule in $rules) {
         try {
-            # Remove existing rule if present
             Remove-NetFirewallRule -Name $rule.Name -EA 0
 
             $params = @{
@@ -51,10 +50,12 @@ FPS-LLMNR-Out-UDP	File and Printer Sharing (LLMNR-UDP-Out)	Outbound	Allow	UDP	An
 
             New-NetFirewallRule @params -EA Stop | Out-Null
             $successCount++
-        } catch { }
+        } catch {
+            Write-Log "  Failed to import rule '$($rule.Name)': $_" "ERROR"
+        }
     }
 
     Write-Log "  Imported $successCount firewall rules" "SUCCESS"
 } else {
-    Write-Log "  [DRY RUN] Would import 21 firewall rules" "INFO"
+    Write-Log "  [DRY RUN] Would import $($rules.Count) firewall rules" "INFO"
 }

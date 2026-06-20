@@ -30,9 +30,8 @@
             }
         }
 
-        # Nuke OneNote AppX packages
-        Get-AppxPackage -AllUsers *OneNote* -EA 0 | Remove-AppxPackage -AllUsers -EA 0
-        Get-AppxProvisionedPackage -Online -EA 0 | Where-Object { $_.DisplayName -match 'OneNote' } | Remove-AppxProvisionedPackage -Online -EA 0
+        # Nuke OneNote AppX packages (routed through Remove-AppxDryRun for manifest tracking)
+        Remove-AppxDryRun -Pattern '*OneNote*'
 
         # Nuke OneNote folders
         @(

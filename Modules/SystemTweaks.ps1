@@ -59,6 +59,14 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "Disab
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentWorkspaces" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRemoteAgentConnectors" -Value 1
 
+# --- Disable Paint AI features (Cocreator, Image Creator, Generative Fill) ---
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableImageCreator" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableGenerativeFill" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableCocreator" -Value 1
+
+# --- Disable IsoEnvBroker (Agent Workspaces) ---
+Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Services\IsoEnvBroker" -Name "Enabled" -Value 0
+
 # --- Disable Microsoft Copilot thoroughly (registry + AppX) ---
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
@@ -470,12 +478,9 @@ if ([int]$osBuild -ge 22000 -and -not $script:isLTSC) {
     Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
     Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarDa" -Value 0
 
-    # Remove Widgets package
+    # Remove Widgets package (Remove-AppxDryRun handles both user and provisioned)
     Remove-AppxDryRun -Pattern '*WebExperience*'
     Remove-AppxDryRun -Pattern '*MicrosoftWindows.Client.WebExperience*'
-    if (-not $DryRun) {
-        Get-AppxProvisionedPackage -Online -EA 0 | Where-Object { $_.DisplayName -match 'WebExperience' } | Remove-AppxProvisionedPackage -Online -EA 0
-    }
 
     Write-Log "  Widgets removed" "SUCCESS"
 }
@@ -486,7 +491,7 @@ if ([int]$osBuild -ge 22000 -and -not $script:isLTSC) {
 Write-Log "[Startup] Cleaning startup items..." "SECTION"
 
 # Registry Run keys to clean (HKCU)
-$startupBloat = @(
+$startupBloat = if ($script:configOverrides.ContainsKey('StartupBloat')) { $script:configOverrides.StartupBloat } else { @(
     'Spotify',
     'Discord',
     'Steam',
@@ -509,7 +514,7 @@ $startupBloat = @(
     # REMOVED: 'Microsoft Teams' - may be needed for business
     # REMOVED: 'Zoom' - may be needed for business
     # REMOVED: 'Update*' - too aggressive, could remove legitimate updaters
-)
+) }
 
 if (-not $DryRun) {
     $runKey = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
@@ -1007,7 +1012,7 @@ Write-Log "  Context menu cleaned" "SUCCESS"
 # ============================================================================
 Write-Log "[Optional Features] Disabling legacy features..." "SECTION"
 
-$featuresToDisable = @(
+$featuresToDisable = if ($script:configOverrides.ContainsKey('FeaturesToDisable')) { $script:configOverrides.FeaturesToDisable } else { @(
     'Internet-Explorer-Optional-amd64',   # Internet Explorer mode
     'MicrosoftWindowsPowerShellV2Root',   # PowerShell v2 (security risk)
     'MicrosoftWindowsPowerShellV2',       # PowerShell v2 engine
@@ -1018,7 +1023,7 @@ $featuresToDisable = @(
     'SMB1Protocol',                        # SMB v1 (security risk)
     'SMB1Protocol-Client',                 # SMB v1 client
     'SMB1Protocol-Server'                  # SMB v1 server
-)
+) }
 
 if (-not $DryRun) {
     foreach ($feature in $featuresToDisable) {

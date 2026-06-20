@@ -133,6 +133,26 @@ if ($UndoFile) {
         }
     }
 
+    # Warn about irrecoverable deletions tracked in manifest
+    $deletedFolders = @($undoManifest.changes.folders_deleted)
+    if ($deletedFolders.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  NOTE: $($deletedFolders.Count) folders were deleted and cannot be auto-restored:" -ForegroundColor Yellow
+        foreach ($f in $deletedFolders) { Write-Host "    - $f" -ForegroundColor White }
+    }
+    $deletedRegKeys = @($undoManifest.changes.registry_deleted)
+    if ($deletedRegKeys.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  NOTE: $($deletedRegKeys.Count) registry keys were deleted and cannot be auto-restored:" -ForegroundColor Yellow
+        foreach ($r in $deletedRegKeys) { Write-Host "    - $r" -ForegroundColor White }
+    }
+    $deletedServices = @($undoManifest.changes.services_deleted)
+    if ($deletedServices.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  NOTE: $($deletedServices.Count) services were deleted (sc.exe delete) and cannot be auto-restored:" -ForegroundColor Yellow
+        foreach ($s in $deletedServices) { Write-Host "    - $s" -ForegroundColor White }
+    }
+
     Write-Host ""
     Write-Host "=== UNDO COMPLETE ===" -ForegroundColor Green
     Write-Host "Restart recommended to apply all restored settings." -ForegroundColor Yellow
@@ -462,6 +482,8 @@ if ($WimPath) {
 # ============================================================================
 # Merge external .psd1 config into the session, overriding built-in arrays
 $script:configOverrides = @{}
+$script:validConfigKeys = @('RemovePatterns','ServicesToDisable','DefenderExclusions','EdgeBookmarks',
+                            'StartupBloat','TasksToDisable','FeaturesToDisable','FirewallRules')
 if ($ConfigPath) {
     if (!(Test-Path $ConfigPath)) {
         Write-Host "ERROR: Config file not found: $ConfigPath" -ForegroundColor Red
@@ -472,6 +494,11 @@ if ($ConfigPath) {
     } catch {
         Write-Host "ERROR: Failed to parse config file: $_" -ForegroundColor Red
         exit 2
+    }
+    foreach ($key in $script:configOverrides.Keys) {
+        if ($script:validConfigKeys -notcontains $key) {
+            Write-Host "WARNING: Unknown config key '$key' in $ConfigPath. Valid keys: $($script:validConfigKeys -join ', ')" -ForegroundColor Yellow
+        }
     }
 }
 
@@ -1133,7 +1160,7 @@ if (Test-PhaseEnabled 'Edge') {
 
 
 # ============================================================================
-# PHASE 6: MAVEN FIREWALL RULES
+# PHASE 6: FIREWALL RULES
 # ============================================================================
 Update-Phase "Firewall Rules"
 

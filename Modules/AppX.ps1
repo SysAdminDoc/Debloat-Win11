@@ -19,9 +19,6 @@ foreach ($pattern in $removePatterns) {
 # Explicit Xbox/Gaming removal (Xbox Live, Gaming Services)
 Remove-AppxDryRun -Pattern '*Xbox*'
 Remove-AppxDryRun -Pattern '*Gaming*'
-if (-not $DryRun) {
-    Get-AppxProvisionedPackage -Online 2>$null | Where-Object { $_.DisplayName -match 'Xbox|Gaming' } | Remove-AppxProvisionedPackage -Online 2>$null
-}
 
 # Remove Xbox folders
 if (-not $DryRun) {

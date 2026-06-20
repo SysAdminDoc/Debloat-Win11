@@ -9,6 +9,10 @@
 #   ServicesToDisable   - Windows services to disable
 #   DefenderExclusions  - Folder paths to exclude from Defender scanning
 #   EdgeBookmarks       - Bookmarks to add to Edge (array of @{name; url} hashtables)
+#   StartupBloat        - Startup registry entries to remove (wildcard patterns)
+#   TasksToDisable      - Scheduled task names to disable (wildcard patterns)
+#   FeaturesToDisable   - Windows optional features to disable
+#   FirewallRules       - Tab-delimited CSV string defining firewall rules
 
 @{
     # AppX packages to remove (wildcard patterns)
@@ -60,26 +64,47 @@
     #     @{ name = "Support Portal"; url = "https://support.example.com" }
     # )
 
-    # === MEDICAL IMAGING PRESET ===
-    # Uncomment the blocks below for medical imaging workstation deployments:
-
-    # DefenderExclusions = @(
-    #     "C:\images",
-    #     "C:\MTU",
-    #     "C:\Maven",
-    #     "C:\Program Files\Voyance",
-    #     "C:\Program Files\VPACS",
-    #     "C:\Program Files\Minipacs",
-    #     "C:\ProgramData\Voyance",
-    #     "C:\ProgramData\VPACS",
-    #     "C:\ProgramData\Minipacs",
-    #     "C:\drtech",
-    #     "C:\ecali1"
+    # Startup bloat entries to remove from registry Run keys (wildcard patterns)
+    # Default removes Spotify, Discord, Steam, Adobe, etc. while preserving Teams/Zoom/Slack
+    # StartupBloat = @(
+    #     'Spotify',
+    #     'Discord',
+    #     'Steam',
+    #     'EpicGamesLauncher',
+    #     'AdobeGCInvoker*',
+    #     'Adobe Creative Cloud',
+    #     'CCXProcess',
+    #     'AdobeAAMUpdater*',
+    #     'iTunesHelper',
+    #     'GoogleUpdate*'
     # )
 
-    # EdgeBookmarks = @(
-    #     @{ name = "Support"; url = "https://www.mavenimaging.com/support" }
-    #     @{ name = "Patient Image"; url = "https://app.patientimage.ai/login" }
-    #     @{ name = "Google"; url = "https://www.google.com" }
+    # Scheduled tasks to disable (task names, wildcards supported)
+    # Default disables Xbox, Edge update, telemetry, CEIP, feedback, maps tasks
+    # TasksToDisable = @(
+    #     'XblGameSaveTask',
+    #     'MicrosoftEdgeUpdateTaskMachineCore*',
+    #     'MicrosoftEdgeUpdateTaskMachineUA*',
+    #     'Consolidator',
+    #     'UsbCeip',
+    #     'Microsoft Compatibility Appraiser'
     # )
+
+    # Windows optional features to disable
+    # Default disables IE, PS v2, WMP, XPS, SMB1, Work Folders
+    # FeaturesToDisable = @(
+    #     'Internet-Explorer-Optional-amd64',
+    #     'MicrosoftWindowsPowerShellV2Root',
+    #     'MicrosoftWindowsPowerShellV2',
+    #     'SMB1Protocol',
+    #     'SMB1Protocol-Client',
+    #     'SMB1Protocol-Server'
+    # )
+
+    # Firewall rules (tab-delimited CSV string with header row)
+    # Default imports file/printer sharing rules
+    # FirewallRules = @"
+    # Name	DisplayName	Direction	Action	Protocol	LocalPort	RemotePort	Program
+    # Custom-Rule-1	My Custom Rule	Inbound	Allow	TCP	8080	Any	System
+    # "@
 }
