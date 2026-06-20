@@ -3007,6 +3007,32 @@ if (-not $DryRun) {
 Write-Log "  Services re-enabled" "SUCCESS"
 
 # ============================================================================
+# REGISTER POST-UPDATE MAINTENANCE TASK
+# ============================================================================
+Write-Log "[Maintenance] Registering post-update scheduled task..." "SECTION"
+$maintainScript = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Debloat-Win11-Maintain.ps1'
+if (Test-Path $maintainScript) {
+    if (-not $DryRun) {
+        $taskName = 'Debloat-Win11-PostUpdate'
+        $existingTask = Get-ScheduledTask -TaskName $taskName -EA 0
+        if (-not $existingTask) {
+            $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-ExecutionPolicy Bypass -NonInteractive -File `"$maintainScript`""
+            $trigger = New-ScheduledTaskTrigger -AtLogOn
+            $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest -LogonType ServiceAccount
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Re-applies privacy/telemetry tweaks after Windows Update resets them' -EA 0 | Out-Null
+            Write-Log "  Scheduled task '$taskName' registered (runs at logon as SYSTEM)" "SUCCESS"
+        } else {
+            Write-Log "  Scheduled task '$taskName' already exists" "INFO"
+        }
+    } else {
+        Write-Log "  [DRY RUN] Would register post-update maintenance task" "INFO"
+    }
+} else {
+    Write-Log "  Debloat-Win11-Maintain.ps1 not found alongside script, skipping task registration" "WARNING"
+}
+
+# ============================================================================
 # RESTART EXPLORER (Apply UI changes immediately)
 # ============================================================================
 Write-Log "[Finalizing] Restarting Explorer..." "SECTION"
