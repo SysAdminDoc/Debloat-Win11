@@ -2,13 +2,13 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.2.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.2.0
+**Version:** v2.3.0
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
-**Compatibility:** Windows 10 (1903+) / Windows 11 (including 24H2/25H2)
+**Compatibility:** Windows 10 (1903+) / Windows 11 (including 24H2/25H2/26H1)
 
 ---
 
@@ -57,6 +57,13 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.0
+- Expanded 25H2/26H1 AppX coverage for Copilot provider, Windows Backup, File Explorer extension, CrossDevice/WebExperience, PC Manager, AIHub, M365 Companions, and Start Experiences packages
+- RemoveDefaultMicrosoftStorePackages policy list now includes newer inbox package family names so Enterprise/Education devices block reinstallation after updates
+- Drift detection, Intune remediation, and maintenance now cover Remote Agent Connectors, Recall data providers, and Recall export policy
+- Shared HKCU maintenance re-applies per-user Copilot, Recall, Windows Backup, and account-notification suppression
+- Version, README badge, detection script, and local Pester coverage synchronized to v2.3.0
 
 ### New in v2.2.0
 - ✅ `-CheckDrift` mode reports registry values reset by Windows Update

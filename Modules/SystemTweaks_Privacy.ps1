@@ -29,9 +29,9 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "Disab
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\WindowsNotepad" -Name "DisableAIFeatures" -Value 1
 
 # ============================================================================
-# WINDOWS 11 24H2/25H2 BLOAT
+# WINDOWS 11 24H2/25H2/26H1 BLOAT
 # ============================================================================
-Write-Log "  Disabling Windows 11 24H2/25H2 bloat..." "INFO"
+Write-Log "  Disabling Windows 11 24H2/25H2/26H1 bloat..." "INFO"
 
 # --- Disable Windows Recall (AI screenshot feature) thoroughly ---
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "TurnOffSavingSnapshots" -Value 1
@@ -53,6 +53,7 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "Disab
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableAgentWorkspaces" -Value 2
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRemoteAgentConnectors" -Value 2
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "DisableRecallDataProviders" -Value 1
+Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "AllowRecallExport" -Value 0
 
 # --- Disable Paint AI features (Cocreator, Image Creator, Generative Fill) ---
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableImageCreator" -Value 1
@@ -70,6 +71,9 @@ Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "HubsSidebarEnabled
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "CopilotCDPPageContext" -Value 0
 Remove-AppxDryRun -Pattern '*Microsoft.Copilot*'
 Remove-AppxDryRun -Pattern '*Microsoft.Windows.Ai.Copilot.Provider*'
+Remove-AppxDryRun -Pattern '*Microsoft.M365Companions*'
+Remove-AppxDryRun -Pattern '*Microsoft.Windows.AIHub*'
+Remove-AppxDryRun -Pattern '*Microsoft.StartExperiencesApp*'
 # RemoveMicrosoftCopilotApp policy (Enterprise/Education only, 24H2+)
 if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
     Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI" -Name "RemoveMicrosoftCopilotApp" -Value 1
@@ -117,7 +121,7 @@ if (-not $DryRun) {
     Remove-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "PhoneLinkAutoStart" -Force -EA 0
 }
 
-Write-Log "  24H2/25H2 bloat disabled" "SUCCESS"
+Write-Log "  24H2/25H2/26H1 bloat disabled" "SUCCESS"
 
 # Disable Bing Search
 Write-Log "  Disabling Bing Search..." "INFO"

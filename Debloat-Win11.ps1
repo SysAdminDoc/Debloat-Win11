@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.2.0
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.0
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -56,6 +56,9 @@ if ($CheckDrift) {
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableSettingsAgent'; Expected = 1 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAgentWorkspaces'; Expected = 2 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAgentConnectors'; Expected = 2 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableRemoteAgentConnectors'; Expected = 2 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableRecallDataProviders'; Expected = 1 }
+        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'AllowRecallExport'; Expected = 0 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'TurnOffSavingSnapshots'; Expected = 1 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableCocreator'; Expected = 1 }
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableImageCreator'; Expected = 1 }
@@ -350,6 +353,7 @@ $script:defaultRemovePatterns = @(
     '*Microsoft.BingWeather*',
     '*Microsoft.BingSearch*',
     '*Microsoft.Copilot*',
+    '*Microsoft.Windows.Ai.Copilot.Provider*',
     '*Microsoft.GamingApp*',
     '*Microsoft.GetHelp*',
     '*Microsoft.Getstarted*',
@@ -368,6 +372,7 @@ $script:defaultRemovePatterns = @(
     '*Microsoft.Todos*',
     '*Microsoft.Wallet*',
     '*Microsoft.Windows.DevHome*',
+    '*Microsoft.WindowsBackup*',
     '*Microsoft.WindowsCamera*',
     '*Microsoft.windowscommunicationsapps*',
     '*Microsoft.WindowsFeedbackHub*',
@@ -385,6 +390,7 @@ $script:defaultRemovePatterns = @(
     '*Microsoft.ZuneVideo*',
     '*Microsoft.Edge.GameAssist*',
     '*Microsoft.WidgetsPlatformRuntime*',
+    '*MicrosoftWindows.Client.FileExp*',
     '*MicrosoftCorporationII.MicrosoftFamily*',
     '*MicrosoftWindows.Client.WebExperience*',
     '*MicrosoftWindows.CrossDevice*',
@@ -636,7 +642,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.2.0'
+    version   = 'v2.3.0'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
@@ -803,7 +809,7 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.2.0 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.3.0 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -1400,7 +1406,7 @@ try {
 if (-not $DryRun) {
     $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
     if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
-    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.2.0" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.0" -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
 }
@@ -1412,7 +1418,7 @@ $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.2.0") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.0") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('') | Out-Null
@@ -1554,7 +1560,7 @@ Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.2.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.3.0 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 

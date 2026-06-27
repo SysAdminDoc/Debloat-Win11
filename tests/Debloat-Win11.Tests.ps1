@@ -494,7 +494,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.2\.0'
+        $scriptContent | Should -Match 'Version.*v2\.3\.0'
     }
 
     It 'detection script checks registry first' {
@@ -533,6 +533,8 @@ Describe 'RemoveDefaultMicrosoftStorePackages Policy' {
         $allContent | Should -Match 'RemoveDefaultMicrosoftStorePackages'
         $allContent | Should -Match 'Clipchamp\.Clipchamp'
         $allContent | Should -Match 'Microsoft\.Copilot_8wekyb3d8bbwe'
+        $allContent | Should -Match 'Microsoft\.Windows\.Ai\.Copilot\.Provider_8wekyb3d8bbwe'
+        $allContent | Should -Match 'MicrosoftWindows\.CrossDevice_cw5n1h2txyewy'
     }
 }
 
@@ -546,6 +548,9 @@ Describe 'Expanded Drift Detection' {
     It 'covers AI agent policies' {
         $scriptContent | Should -Match "DisableSettingsAgent.*Expected"
         $scriptContent | Should -Match "DisableAgentWorkspaces.*Expected"
+        $scriptContent | Should -Match "DisableRemoteAgentConnectors.*Expected"
+        $scriptContent | Should -Match "DisableRecallDataProviders.*Expected"
+        $scriptContent | Should -Match "AllowRecallExport.*Expected"
     }
 
     It 'covers Edge telemetry' {

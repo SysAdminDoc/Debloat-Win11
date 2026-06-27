@@ -26,12 +26,15 @@
     #     '*Microsoft.BingSports*',   # Safe: consumer sports
     #     '*Microsoft.BingWeather*',  # Safe: consumer weather
     #     '*Microsoft.BingSearch*',   # Safe: Bing integration
+    #     '*Microsoft.Windows.Ai.Copilot.Provider*',  # Safe: Copilot provider
     #     '*Microsoft.GamingApp*',    # Safe: Xbox companion
     #     '*Microsoft.GetHelp*',      # Safe: help app
     #     '*Microsoft.Getstarted*',   # Safe: tips app
     #     '*Microsoft.MicrosoftSolitaireCollection*',  # Safe: games
     #     '*Microsoft.People*',       # Safe: contacts (may break Mail)
     #     '*Microsoft.WindowsFeedbackHub*',  # Safe: feedback
+    #     '*Microsoft.WindowsBackup*', # Safe: backup nag app
+    #     '*MicrosoftWindows.Client.FileExp*', # Safe: consumer File Explorer extension
     #     '*Microsoft.ZuneMusic*',    # Safe: Groove Music
     #     '*Microsoft.ZuneVideo*',    # Safe: Movies & TV
     #     '*Disney*',                 # Safe: third-party
