@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.0-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.1-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.0
+**Version:** v2.3.1
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,10 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.1
+- Fixed PowerShell 7 service cleanup so undo manifests preserve service startup types before parallel disable operations
+- Added Pester coverage for PowerShell 7 service manifest fidelity
 
 ### New in v2.3.0
 - Expanded 25H2/26H1 AppX coverage for Copilot provider, Windows Backup, File Explorer extension, CrossDevice/WebExperience, PC Manager, AIHub, M365 Companions, and Start Experiences packages
@@ -1261,6 +1265,14 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 
 ## Changelog
 
+### Version 2.3.1 (June 2026)
+
+**Bug Fixes:**
+- Preserved original service startup types before the PowerShell 7 parallel service-disable path mutates services, restoring undo/revert fidelity.
+
+**Tests:**
+- Added Pester coverage that verifies PowerShell 7 service manifest entries come from pre-mutation snapshots.
+
 ### Version 2.0.0 (June 2026)
 
 **New Features:**
@@ -1342,4 +1354,4 @@ This script is provided as-is. No warranty is provided. Test in a non-production
 
 ---
 
-*Documentation last updated: March 18, 2026*
+*Documentation last updated: June 28, 2026*

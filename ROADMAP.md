@@ -1,15 +1,6 @@
 # Debloat-Win11 Roadmap
 
-No actionable roadmap items remain.
-
 ## Research-Driven Additions
-
-- [ ] P0 - Preserve service startup types in the PowerShell 7 path
-  Why: Undo/revert fidelity breaks when the parallel service path records startup type after disabling services.
-  Evidence: `Modules/Services.ps1:70-86`, `Debloat-Win11.ps1:760-772`
-  Touches: `Modules/Services.ps1`, `tests/Debloat-Win11.Tests.ps1`
-  Acceptance: PowerShell 7 service cleanup snapshots startup types before mutation, generated manifest/revert script restores the original type, and Pester mocks prove the order.
-  Complexity: S
 
 - [ ] P0 - Make event-log clearing explicit opt-in
   Why: Clearing every Windows event log conflicts with managed-device audit/SIEM expectations.

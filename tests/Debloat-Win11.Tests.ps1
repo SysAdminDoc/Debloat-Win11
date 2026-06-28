@@ -153,6 +153,25 @@ Describe 'Disable-ServiceDryRun' {
     }
 }
 
+Describe 'PowerShell 7 Service Manifest Fidelity' {
+    BeforeAll {
+        $servicesContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Services.ps1') -Raw
+        $ps7Block = [regex]::Match($servicesContent, 'if \(\$PSVersionTable\.PSVersion\.Major -ge 7 -and -not \$DryRun\) \{([\s\S]*?)\} else \{').Groups[1].Value
+    }
+
+    It 'snapshots service startup types before parallel disable' {
+        $snapshotIndex = $ps7Block.IndexOf('$serviceStartupSnapshots')
+        $parallelIndex = $ps7Block.IndexOf('ForEach-Object -Parallel')
+        $snapshotIndex | Should -BeGreaterOrEqual 0
+        $parallelIndex | Should -BeGreaterThan $snapshotIndex
+    }
+
+    It 'records manifest entries from pre-mutation snapshots' {
+        $ps7Block | Should -Match 'original_startup_type\s*=\s*\$svcSnapshot\.OriginalStartupType'
+        $ps7Block | Should -Not -Match 'original_startup_type\s*=\s*\$svcObj\.StartType\.ToString\(\)'
+    }
+}
+
 Describe 'DryRun Guards' {
     It 'has at least 10 DryRun guard blocks covering destructive phases' {
         $dryRunGuards = ([regex]::Matches($allContent, 'if\s*\(\s*-not\s+\$DryRun\s*\)')).Count
@@ -494,7 +513,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.0'
+        $scriptContent | Should -Match 'Version.*v2\.3\.1'
     }
 
     It 'detection script checks registry first' {

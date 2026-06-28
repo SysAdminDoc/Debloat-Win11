@@ -68,8 +68,20 @@ $servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable'
 
 # Parallel service disable on PS7+; sequential fallback on PS5
 if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $DryRun) {
-    # Parallel path: stop and disable in bulk, then record in manifest
-    $servicesToDisable | ForEach-Object -Parallel {
+    # Snapshot startup types before parallel mutation so undo restores the true original state.
+    $serviceStartupSnapshots = [System.Collections.ArrayList]@()
+    foreach ($svcName in $servicesToDisable) {
+        $svcObj = Get-Service -Name $svcName -EA 0
+        if ($svcObj) {
+            $serviceStartupSnapshots.Add([pscustomobject]@{
+                Name = $svcName
+                OriginalStartupType = $svcObj.StartType.ToString()
+            }) | Out-Null
+        }
+    }
+
+    # Parallel path: stop and disable in bulk, then record the pre-mutation snapshots in manifest
+    $serviceStartupSnapshots.Name | ForEach-Object -Parallel {
         $svc = Get-Service -Name $_ -EA SilentlyContinue
         if ($svc) {
             Stop-Service -Name $_ -Force -EA SilentlyContinue
@@ -77,15 +89,12 @@ if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $DryRun) {
         }
     } -ThrottleLimit 8
     # Record in manifest (must be sequential for thread-safe ArrayList)
-    foreach ($svcName in $servicesToDisable) {
-        $svcObj = Get-Service -Name $svcName -EA 0
-        if ($svcObj) {
-            $script:manifest.changes.services_disabled.Add(@{
-                name = $svcName
-                original_startup_type = $svcObj.StartType.ToString()
-            }) | Out-Null
-            $script:counters.ServicesDisabled++
-        }
+    foreach ($svcSnapshot in $serviceStartupSnapshots) {
+        $script:manifest.changes.services_disabled.Add(@{
+            name = $svcSnapshot.Name
+            original_startup_type = $svcSnapshot.OriginalStartupType
+        }) | Out-Null
+        $script:counters.ServicesDisabled++
     }
 } else {
     foreach ($svc in $servicesToDisable) {
