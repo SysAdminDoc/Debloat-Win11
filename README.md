@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.7-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.8-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.7
+**Version:** v2.3.8
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,10 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.8
+- Expanded Pester behavior tests with mocks for service mutation, event-log clearing, WIM cleanup, registry writes, and report generation
+- The destructive-operation checks run locally without stopping services, clearing logs, mounting images, editing registry state, or writing reports
 
 ### New in v2.3.7
 - Added local PSScriptAnalyzer settings with PowerShell 5.1 compatibility rules
@@ -1310,6 +1314,11 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.8 (June 2026)
+
+**Tests:**
+- Expanded Pester behavior coverage for destructive operations using mocks instead of host mutation.
 
 ### Version 2.3.7 (June 2026)
 

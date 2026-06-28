@@ -599,7 +599,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.7'
+        $scriptContent | Should -Match 'Version.*v2\.3\.8'
     }
 
     It 'detection script checks registry first' {
@@ -724,6 +724,180 @@ Describe 'WindowsAI Policy Map' {
     It 'drives remediation and maintenance from the shared policy file' {
         $remediateContent | Should -Match 'WindowsAiPolicies\.psd1'
         $maintainContent | Should -Match 'WindowsAiPolicies\.psd1'
+    }
+}
+
+Describe 'Destructive Operation Behavior Mocks' {
+    BeforeAll {
+        function Mount-WindowsImage {
+            [CmdletBinding()]
+            param(
+                [string]$ImagePath,
+                [int]$Index,
+                [string]$Path
+            )
+        }
+
+        function Dismount-WindowsImage {
+            [CmdletBinding()]
+            param(
+                [string]$Path,
+                [switch]$Save,
+                [switch]$Discard
+            )
+        }
+
+        function Invoke-TestServiceDisable {
+            param([string]$ServiceName, [switch]$DryRun)
+
+            $svc = Get-Service -Name $ServiceName -EA 0
+            if (-not $svc) { return }
+
+            $script:testManifest.changes.services_disabled.Add(@{
+                name = $ServiceName
+                original_startup_type = $svc.StartType.ToString()
+            }) | Out-Null
+
+            if (-not $DryRun) {
+                Stop-Service -Name $ServiceName -Force -EA 0
+                Set-Service -Name $ServiceName -StartupType Disabled -EA 0
+            }
+        }
+
+        function Invoke-TestEventLogClear {
+            param([string[]]$ClearEventLogs)
+
+            foreach ($eventLogName in $ClearEventLogs) {
+                if ([string]::IsNullOrWhiteSpace($eventLogName)) { continue }
+                wevtutil cl "$eventLogName"
+            }
+        }
+
+        function Invoke-TestWimMutation {
+            param([switch]$ShouldFail)
+
+            $wimMounted = $false
+            $wimSave = $false
+            try {
+                Mount-WindowsImage -ImagePath 'C:\install.wim' -Index 1 -Path 'C:\Mount' -EA Stop | Out-Null
+                $wimMounted = $true
+                if ($ShouldFail) { throw 'simulated WIM failure' }
+                $wimSave = $true
+            } finally {
+                if ($wimMounted) {
+                    if ($wimSave) {
+                        Dismount-WindowsImage -Path 'C:\Mount' -Save -EA 0 | Out-Null
+                    } else {
+                        Dismount-WindowsImage -Path 'C:\Mount' -Discard -EA 0 | Out-Null
+                    }
+                }
+            }
+        }
+
+        function Invoke-TestRegistrySet {
+            param([string]$Path, [string]$Name, $Value, [switch]$DryRun)
+
+            $oldValue = $null
+            if (Test-Path $Path) {
+                $existing = Get-ItemProperty -Path $Path -Name $Name -EA 0
+                if ($existing) { $oldValue = $existing.$Name }
+            }
+
+            $script:testManifest.changes.registry_set.Add(@{
+                path = $Path
+                name = $Name
+                old_value = $oldValue
+                new_value = $Value
+                type = 'DWord'
+            }) | Out-Null
+
+            if (-not $DryRun) {
+                if (!(Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
+                Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type DWord -Force -EA 0
+            }
+        }
+
+        function Invoke-TestHtmlReport {
+            param([string]$Path, [object[]]$Rows)
+
+            $htmlRows = ($Rows | ForEach-Object {
+                $name = [System.Net.WebUtility]::HtmlEncode([string]$_.Name)
+                $value = [System.Net.WebUtility]::HtmlEncode([string]$_.Value)
+                "<tr><td>$name</td><td>$value</td></tr>"
+            }) -join "`n"
+
+            Set-Content -Path $Path -Value "<table>$htmlRows</table>" -Encoding UTF8
+        }
+    }
+
+    BeforeEach {
+        $script:testManifest = @{
+            changes = @{
+                registry_set = [System.Collections.ArrayList]@()
+                services_disabled = [System.Collections.ArrayList]@()
+            }
+        }
+    }
+
+    It 'mocks Stop-Service and Set-Service while preserving original startup type' {
+        Mock Get-Service { [pscustomobject]@{ Name = 'TestSvc'; StartType = 'Manual' } }
+        Mock Stop-Service {}
+        Mock Set-Service {}
+
+        Invoke-TestServiceDisable -ServiceName 'TestSvc'
+
+        $script:testManifest.changes.services_disabled[0].original_startup_type | Should -Be 'Manual'
+        Assert-MockCalled Stop-Service -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'TestSvc' -and $Force }
+        Assert-MockCalled Set-Service -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'TestSvc' -and $StartupType -eq 'Disabled' }
+    }
+
+    It 'mocks wevtutil and clears only configured event logs' {
+        Mock wevtutil {}
+
+        Invoke-TestEventLogClear -ClearEventLogs @('Application', '', 'System')
+
+        Assert-MockCalled wevtutil -Times 2 -Exactly -Scope It
+        Assert-MockCalled wevtutil -Times 1 -Exactly -Scope It -ParameterFilter { $args[0] -eq 'cl' -and $args[1] -eq 'Application' }
+        Assert-MockCalled wevtutil -Times 1 -Exactly -Scope It -ParameterFilter { $args[0] -eq 'cl' -and $args[1] -eq 'System' }
+    }
+
+    It 'mocks WIM mount and discards image changes after failure' {
+        Mock Mount-WindowsImage { [pscustomobject]@{ Mounted = $true } }
+        Mock Dismount-WindowsImage {}
+
+        { Invoke-TestWimMutation -ShouldFail } | Should -Throw 'simulated WIM failure'
+
+        Assert-MockCalled Mount-WindowsImage -Times 1 -Exactly -Scope It
+        Assert-MockCalled Dismount-WindowsImage -Times 1 -Exactly -Scope It -ParameterFilter { $Path -eq 'C:\Mount' -and $Discard }
+        Assert-MockCalled Dismount-WindowsImage -Times 0 -Exactly -Scope It -ParameterFilter { $Save }
+    }
+
+    It 'mocks registry setters and avoids host writes in DryRun' {
+        Mock Test-Path { $true }
+        Mock Get-ItemProperty { [pscustomobject]@{ ExistingValue = 3 } }
+        Mock New-Item {}
+        Mock Set-ItemProperty {}
+
+        Invoke-TestRegistrySet -Path 'HKLM:\SOFTWARE\Test' -Name 'ExistingValue' -Value 1 -DryRun
+
+        $script:testManifest.changes.registry_set[0].old_value | Should -Be 3
+        $script:testManifest.changes.registry_set[0].new_value | Should -Be 1
+        Assert-MockCalled Set-ItemProperty -Times 0 -Exactly -Scope It
+        Assert-MockCalled New-Item -Times 0 -Exactly -Scope It
+    }
+
+    It 'mocks report generation and encodes manifest-derived values' {
+        Mock Set-Content {}
+
+        Invoke-TestHtmlReport -Path 'C:\Temp\report.html' -Rows @(
+            [pscustomobject]@{ Name = '<Path>'; Value = '"quoted" & raw' }
+        )
+
+        Assert-MockCalled Set-Content -Times 1 -Exactly -Scope It -ParameterFilter {
+            $Path -eq 'C:\Temp\report.html' -and
+            $Value -match '&lt;Path&gt;' -and
+            $Value -match '&quot;quoted&quot; &amp; raw'
+        }
     }
 }
 
