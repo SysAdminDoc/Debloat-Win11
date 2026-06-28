@@ -599,7 +599,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.6'
+        $scriptContent | Should -Match 'Version.*v2\.3\.7'
     }
 
     It 'detection script checks registry first' {
@@ -732,5 +732,31 @@ Describe 'Maintenance Task Trigger' {
         $scriptContent | Should -Not -Match 'New-ScheduledTaskTrigger -AtLogOn'
         $scriptContent | Should -Match 'EventID=19'
         $scriptContent | Should -Match 'WindowsUpdateClient'
+    }
+}
+
+Describe 'PSScriptAnalyzer Gate' {
+    BeforeAll {
+        $settingsContent = Get-Content (Join-Path $PSScriptRoot '..' 'PSScriptAnalyzerSettings.psd1') -Raw
+        $gateContent = Get-Content (Join-Path $PSScriptRoot '..' 'tools' 'Invoke-StaticAnalysis.ps1') -Raw
+    }
+
+    It 'enables PowerShell 5.1 compatibility rules' {
+        $settingsContent | Should -Match 'PSUseCompatibleSyntax'
+        $settingsContent | Should -Match 'PSUseCompatibleCommands'
+        $settingsContent | Should -Match 'PSUseCompatibleTypes'
+        $settingsContent | Should -Match "TargetVersions\s*=\s*@\('5\.1'\)"
+        $settingsContent | Should -Match 'win-48_x64_10\.0\.17763\.0_5\.1\.17763\.316_x64_4\.0\.30319\.42000_framework'
+    }
+
+    It 'runs Invoke-ScriptAnalyzer with the repo settings file' {
+        $gateContent | Should -Match 'Invoke-ScriptAnalyzer'
+        $gateContent | Should -Match 'PSScriptAnalyzerSettings\.psd1'
+        $gateContent | Should -Match '-Recurse'
+    }
+
+    It 'fails the local gate on analyzer errors' {
+        $gateContent | Should -Match "Severity -eq 'Error'"
+        $gateContent | Should -Match 'Write-Error "PSScriptAnalyzer found'
     }
 }

@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.6-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.7-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.6
+**Version:** v2.3.7
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,10 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.7
+- Added local PSScriptAnalyzer settings with PowerShell 5.1 compatibility rules
+- Added `tools\Invoke-StaticAnalysis.ps1` to scan `.ps1` and `.psd1` files and fail on analyzer errors
 
 ### New in v2.3.6
 - HTML reports now encode registry, service, AppX, and task table values before rendering
@@ -1130,6 +1134,12 @@ EdgeBookmarks = @(
 )
 ```
 
+### Local Validation
+```powershell
+Invoke-Pester .\tests\
+.\tools\Invoke-StaticAnalysis.ps1
+```
+
 ### Clearing Event Logs
 
 Event-log clearing is disabled by default to preserve audit and SIEM evidence on managed devices. Add `ClearEventLogs` to your config only when your deployment policy explicitly requires targeted log clearing:
@@ -1300,6 +1310,11 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.7 (June 2026)
+
+**New Features:**
+- Added local PSScriptAnalyzer settings and a static-analysis gate for PowerShell 5.1 compatibility checks.
 
 ### Version 2.3.6 (June 2026)
 
