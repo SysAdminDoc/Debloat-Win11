@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.5-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.6-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.5
+**Version:** v2.3.6
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,10 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.6
+- HTML reports now encode registry, service, AppX, and task table values before rendering
+- Report encoding tests cover `<`, `>`, `&`, quotes, and apostrophes
 
 ### New in v2.3.5
 - WIM mode now honors `-ConfigPath` `RemovePatterns` for offline provisioned package removal
@@ -1296,6 +1300,11 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.6 (June 2026)
+
+**Bug Fixes:**
+- HTML reports now encode all manifest-derived table values before rendering.
 
 ### Version 2.3.5 (June 2026)
 

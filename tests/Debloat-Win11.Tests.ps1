@@ -412,6 +412,28 @@ Describe 'Revert Script Generation' {
     }
 }
 
+Describe 'HTML Report Encoding' {
+    It 'defines a helper that uses System.Net.WebUtility HtmlEncode' {
+        $scriptContent | Should -Match 'function ConvertTo-HtmlCell'
+        $scriptContent | Should -Match '\[System\.Net\.WebUtility\]::HtmlEncode'
+    }
+
+    It 'routes report table values through ConvertTo-HtmlCell' {
+        foreach ($variable in @('path','name','oldValue','newValue','serviceName','serviceAction','appName','taskName')) {
+            $scriptContent | Should -Match ('\${0}\s*=\s*ConvertTo-HtmlCell' -f $variable)
+        }
+    }
+
+    It 'encodes HTML-sensitive characters used in manifest values' {
+        $encoded = [System.Net.WebUtility]::HtmlEncode("<tag attr=`"value`">&'")
+        $encoded | Should -Match '&lt;'
+        $encoded | Should -Match '&gt;'
+        $encoded | Should -Match '&amp;'
+        $encoded | Should -Match '&quot;'
+        $encoded | Should -Match '&#39;'
+    }
+}
+
 Describe 'Pre-Flight Enhancements' {
     It 'reports VBS/HVCI status' {
         $scriptContent | Should -Match 'VirtualizationBasedSecurityStatus'
@@ -577,7 +599,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.5'
+        $scriptContent | Should -Match 'Version.*v2\.3\.6'
     }
 
     It 'detection script checks registry first' {
