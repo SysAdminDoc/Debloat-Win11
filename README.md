@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.2-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.3-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.2
+**Version:** v2.3.3
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,11 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.3
+- WindowsAI policy application, drift detection, and remediation now share `Modules/WindowsAiPolicies.psd1`
+- `DisableRecallDataProviders` is applied as a user-scope policy instead of an HKLM/device policy
+- Copilot hardware-key policy metadata is represented without applying a deployment-specific AUMID by default
 
 ### New in v2.3.2
 - Event-log clearing is now explicit opt-in through the `ClearEventLogs` config key so managed-device audit/SIEM evidence is preserved by default
@@ -1280,6 +1285,14 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.3 (June 2026)
+
+**Bug Fixes:**
+- Aligned WindowsAI policy scope handling with Microsoft Policy CSP documentation, including user-scope `DisableRecallDataProviders`.
+
+**New Features:**
+- Added a shared WindowsAI policy map consumed by apply, drift detection, remediation, and maintenance paths.
 
 ### Version 2.3.2 (June 2026)
 

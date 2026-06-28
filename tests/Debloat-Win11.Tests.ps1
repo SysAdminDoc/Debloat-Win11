@@ -9,6 +9,9 @@ BeforeAll {
         Get-ChildItem $modulesDir -Filter '*.ps1' | ForEach-Object {
             $allContent += "`n" + (Get-Content $_.FullName -Raw)
         }
+        Get-ChildItem $modulesDir -Filter '*.psd1' | ForEach-Object {
+            $allContent += "`n" + (Get-Content $_.FullName -Raw)
+        }
     }
 }
 
@@ -541,7 +544,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.2'
+        $scriptContent | Should -Match 'Version.*v2\.3\.3'
     }
 
     It 'detection script checks registry first' {
@@ -588,16 +591,18 @@ Describe 'RemoveDefaultMicrosoftStorePackages Policy' {
 Describe 'Expanded Drift Detection' {
     It 'checks at least 30 registry values' {
         $driftBlock = [regex]::Match($scriptContent, '\$driftChecks\s*=\s*@\(([\s\S]*?)\)').Groups[1].Value
-        $checkCount = ([regex]::Matches($driftBlock, '@\{')).Count
+        $policyFile = Join-Path $PSScriptRoot '..' 'Modules' 'WindowsAiPolicies.psd1'
+        $policyChecks = & ([scriptblock]::Create((Get-Content $policyFile -Raw))) | Where-Object { $_.ApplyByDefault -ne $false }
+        $checkCount = ([regex]::Matches($driftBlock, '@\{')).Count + @($policyChecks).Count
         $checkCount | Should -BeGreaterOrEqual 30
     }
 
     It 'covers AI agent policies' {
-        $scriptContent | Should -Match "DisableSettingsAgent.*Expected"
-        $scriptContent | Should -Match "DisableAgentWorkspaces.*Expected"
-        $scriptContent | Should -Match "DisableRemoteAgentConnectors.*Expected"
-        $scriptContent | Should -Match "DisableRecallDataProviders.*Expected"
-        $scriptContent | Should -Match "AllowRecallExport.*Expected"
+        $allContent | Should -Match "DisableSettingsAgent"
+        $allContent | Should -Match "DisableAgentWorkspaces"
+        $allContent | Should -Match "DisableRemoteAgentConnectors"
+        $allContent | Should -Match "DisableRecallDataProviders"
+        $allContent | Should -Match "AllowRecallExport"
     }
 
     It 'covers Edge telemetry' {
@@ -606,6 +611,43 @@ Describe 'Expanded Drift Detection' {
 
     It 'covers WDigest security' {
         $scriptContent | Should -Match "UseLogonCredential.*Expected.*0"
+    }
+}
+
+Describe 'WindowsAI Policy Map' {
+    BeforeAll {
+        $windowsAiPolicyFile = Join-Path $PSScriptRoot '..' 'Modules' 'WindowsAiPolicies.psd1'
+        $windowsAiPolicies = & ([scriptblock]::Create((Get-Content $windowsAiPolicyFile -Raw)))
+        $hkcuContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'HkcuTweaks.psd1') -Raw
+        $remediateContent = Get-Content (Join-Path $PSScriptRoot '..' 'Remediate-Drift.ps1') -Raw
+        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
+    }
+
+    It 'keeps DisableRecallDataProviders as a user-scope policy' {
+        $policy = $windowsAiPolicies | Where-Object { $_.Name -eq 'DisableRecallDataProviders' }
+        $policy.Scope | Should -Be 'User'
+        $policy.Path | Should -Be 'SOFTWARE\Policies\Microsoft\Windows\WindowsAI'
+        $hkcuContent | Should -Match 'DisableRecallDataProviders'
+    }
+
+    It 'keeps connector policies as device-scope disable values' {
+        foreach ($name in @('DisableAgentConnectors','DisableAgentWorkspaces','DisableRemoteAgentConnectors')) {
+            $policy = $windowsAiPolicies | Where-Object { $_.Name -eq $name }
+            $policy.Scope | Should -Be 'Device'
+            $policy.Value | Should -Be 2
+        }
+    }
+
+    It 'represents Copilot hardware key policy without applying a fake AUMID by default' {
+        $policy = $windowsAiPolicies | Where-Object { $_.Name -eq 'SetCopilotHardwareKey' }
+        $policy.Scope | Should -Be 'User'
+        $policy.Type | Should -Be 'String'
+        $policy.ApplyByDefault | Should -Be $false
+    }
+
+    It 'drives remediation and maintenance from the shared policy file' {
+        $remediateContent | Should -Match 'WindowsAiPolicies\.psd1'
+        $maintainContent | Should -Match 'WindowsAiPolicies\.psd1'
     }
 }
 

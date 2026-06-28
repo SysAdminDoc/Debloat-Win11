@@ -2,13 +2,6 @@
 
 ## Research-Driven Additions
 
-- [ ] P1 - Align WindowsAI policy scope and names with Microsoft docs
-  Why: `DisableRecallDataProviders` is currently treated as HKLM/device policy, while Microsoft documents it as user-scope; newer connector and hardware-key policies are not represented.
-  Evidence: `Modules/SystemTweaks_Privacy.ps1:48-56`, `Detect-Drift.ps1:22-26`, Microsoft WindowsAI Policy CSP
-  Touches: `Modules/SystemTweaks_Privacy.ps1`, `Modules/HkcuTweaks.psd1`, `Detect-Drift.ps1`, `Remediate-Drift.ps1`, `Debloat-Win11-Maintain.ps1`, `tests/Debloat-Win11.Tests.ps1`
-  Acceptance: WindowsAI policy definitions are driven from a shared map with correct HKLM/HKCU scope, drift/remediation parity, and tests for `DisableRecallDataProviders`, connector policies, and hardware key handling.
-  Complexity: M
-
 - [ ] P1 - Validate and package RemoveDefaultMicrosoftStorePackages policy output
   Why: Microsoft documents CSP XML/static IDs/dynamic PFN list behavior and GPO/MDM conflict rules that need validation against the direct registry writes.
   Evidence: `Modules/AppX.ps1:34-80`, Microsoft policy-based in-box app removal docs
