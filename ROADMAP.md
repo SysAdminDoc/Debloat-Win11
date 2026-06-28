@@ -2,13 +2,6 @@
 
 ## Research-Driven Additions
 
-- [ ] P1 - Add WIM-mode failure cleanup and config parity
-  Why: Offline image mode can leave mounts behind on failure and ignores `-ConfigPath` remove patterns.
-  Evidence: `Debloat-Win11.ps1:458-547`, Winhance ISO tooling, tiny11builder offline servicing pattern
-  Touches: `Debloat-Win11.ps1`, `tests/Debloat-Win11.Tests.ps1`
-  Acceptance: WIM mode uses try/finally with save/discard behavior, honors config remove patterns, reports offline changes, and has mocked tests for mount failure, removal failure, and cleanup.
-  Complexity: M
-
 - [ ] P2 - HTML-encode all report table values
   Why: Manifest values are interpolated directly into HTML and can corrupt or inject report markup.
   Evidence: `Debloat-Win11.ps1:1466-1475`

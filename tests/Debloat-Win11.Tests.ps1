@@ -426,6 +426,39 @@ Describe 'Pre-Flight Enhancements' {
     }
 }
 
+Describe 'WIM Mode Resilience' {
+    It 'loads config before WIM mode so offline removals honor ConfigPath' {
+        $configIndex = $scriptContent.IndexOf('# CONFIG FILE SUPPORT')
+        $wimIndex = $scriptContent.IndexOf('# WIM IMAGE MODE')
+        $configIndex | Should -BeGreaterOrEqual 0
+        $wimIndex | Should -BeGreaterThan $configIndex
+        $scriptContent | Should -Match "configOverrides\.ContainsKey\('RemovePatterns'\)"
+    }
+
+    It 'wraps WIM mutation in try/finally cleanup' {
+        $scriptContent | Should -Match 'try \{'
+        $scriptContent | Should -Match '\} finally \{'
+        $scriptContent | Should -Match '\$wimMounted'
+    }
+
+    It 'saves only successful WIM mutations' {
+        $scriptContent | Should -Match '\$wimSave = \$true'
+        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$MountDir -Save'
+    }
+
+    It 'discards mounted image changes on failure' {
+        $scriptContent | Should -Match 'WIM mode failed'
+        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$MountDir -Discard'
+    }
+
+    It 'unloads offline hives in cleanup paths' {
+        $scriptContent | Should -Match '\$defaultHiveLoaded'
+        $scriptContent | Should -Match '\$softwareHiveLoaded'
+        $scriptContent | Should -Match 'reg unload "HKU\\OfflineWIM"'
+        $scriptContent | Should -Match 'reg unload "HKU\\OfflineSW"'
+    }
+}
+
 # ============================================================================
 # MOCK-BASED BEHAVIORAL TESTS
 # ============================================================================
@@ -544,7 +577,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.4'
+        $scriptContent | Should -Match 'Version.*v2\.3\.5'
     }
 
     It 'detection script checks registry first' {

@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.4-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.5-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.4
+**Version:** v2.3.5
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,11 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.5
+- WIM mode now honors `-ConfigPath` `RemovePatterns` for offline provisioned package removal
+- WIM mode uses failure cleanup that unloads offline hives and discards mounted image changes unless all operations succeed
+- WIM mode reports removed package counts after successful save
 
 ### New in v2.3.4
 - RemoveDefaultMicrosoftStorePackages now validates package-family-name formatting before writing numbered registry values
@@ -1291,6 +1296,11 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.5 (June 2026)
+
+**Bug Fixes:**
+- WIM mode now honors `-ConfigPath` remove patterns and discards mounted image changes on failure after unloading offline hives.
 
 ### Version 2.3.4 (June 2026)
 

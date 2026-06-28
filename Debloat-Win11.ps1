@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.4
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.5
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -454,109 +454,6 @@ $script:defaultRemovePatterns = @(
 )
 
 # ============================================================================
-# WIM IMAGE MODE - Offline debloat of a mounted Windows image
-# ============================================================================
-if ($WimPath) {
-    if (!(Test-Path $WimPath)) {
-        Write-Host "ERROR: WIM file not found: $WimPath" -ForegroundColor Red
-        exit 2
-    }
-
-    Write-Host "=== WIM IMAGE MODE ===" -ForegroundColor Yellow
-    Write-Host "  Image: $WimPath (Index $WimIndex)" -ForegroundColor Cyan
-    Write-Host "  Mount: $MountDir" -ForegroundColor Cyan
-
-    if (!(Test-Path $MountDir)) { New-Item -Path $MountDir -ItemType Directory -Force | Out-Null }
-
-    Write-Host "`n  Mounting image..." -ForegroundColor Gray
-    $mountResult = Mount-WindowsImage -ImagePath $WimPath -Index $WimIndex -Path $MountDir -EA 0
-    if (-not $mountResult) {
-        Write-Host "ERROR: Failed to mount WIM image" -ForegroundColor Red
-        exit 2
-    }
-    Write-Host "  Mounted successfully" -ForegroundColor Green
-
-    # Remove provisioned AppX packages from the offline image
-    Write-Host "`n  Removing provisioned AppX packages..." -ForegroundColor Gray
-    $provPkgs = Get-AppxProvisionedPackage -Path $MountDir -EA 0
-    $removePatterns = $script:defaultRemovePatterns
-    $removed = 0
-    foreach ($pkg in $provPkgs) {
-        foreach ($pattern in $removePatterns) {
-            if ($pkg.DisplayName -like $pattern -or $pkg.PackageName -like $pattern) {
-                Remove-AppxProvisionedPackage -Path $MountDir -PackageName $pkg.PackageName -EA 0 | Out-Null
-                Write-Host "    Removed: $($pkg.DisplayName)" -ForegroundColor DarkGray
-                $removed++
-                break
-            }
-        }
-    }
-    Write-Host "  Removed $removed provisioned packages" -ForegroundColor Green
-
-    # Apply registry tweaks to the offline Default user hive
-    Write-Host "`n  Applying offline registry tweaks..." -ForegroundColor Gray
-    $offlineHive = "$MountDir\Users\Default\NTUSER.DAT"
-    if (Test-Path $offlineHive) {
-        $hiveName = "HKU\OfflineWIM"
-        reg load $hiveName $offlineHive 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SilentInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v ContentDeliveryAllowed /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v OemPreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v PreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v FeatureManagementEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Hidden /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAl /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            [gc]::Collect()
-            Start-Sleep -Milliseconds 500
-            reg unload $hiveName 2>$null
-            Write-Host "  Default user hive configured" -ForegroundColor Green
-        }
-    }
-
-    # Apply HKLM tweaks to the offline SOFTWARE hive
-    $offlineSW = "$MountDir\Windows\System32\config\SOFTWARE"
-    if (Test-Path $offlineSW) {
-        $swHive = "HKU\OfflineSW"
-        reg load $swHive $offlineSW 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            reg add "$swHive\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v DisableAIDataAnalysis /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v AllowRecallEnablement /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            [gc]::Collect()
-            Start-Sleep -Milliseconds 500
-            reg unload $swHive 2>$null
-            Write-Host "  System policies configured" -ForegroundColor Green
-        }
-    }
-
-    # Unmount and commit
-    Write-Host "`n  Unmounting and saving image..." -ForegroundColor Gray
-    Dismount-WindowsImage -Path $MountDir -Save -EA 0 | Out-Null
-    Write-Host "  Image saved successfully" -ForegroundColor Green
-
-    Write-Host ""
-    Write-Host "=== WIM DEBLOAT COMPLETE ===" -ForegroundColor Green
-    Write-Host "  Removed: $removed AppX packages" -ForegroundColor White
-    Write-Host "  Applied: privacy, telemetry, UI, OOBE, and AI policy tweaks" -ForegroundColor White
-    Write-Host "  Image ready for deployment via DISM, MDT, or WDS" -ForegroundColor Cyan
-    exit 0
-}
-
-# ============================================================================
 # CONFIG FILE SUPPORT
 # ============================================================================
 # Merge external .psd1 config into the session, overriding built-in arrays
@@ -580,6 +477,141 @@ if ($ConfigPath) {
             Write-Host "WARNING: Unknown config key '$key' in $ConfigPath. Valid keys: $($script:validConfigKeys -join ', ')" -ForegroundColor Yellow
         }
     }
+}
+
+# ============================================================================
+# WIM IMAGE MODE - Offline debloat of a mounted Windows image
+# ============================================================================
+if ($WimPath) {
+    if (!(Test-Path $WimPath)) {
+        Write-Host "ERROR: WIM file not found: $WimPath" -ForegroundColor Red
+        exit 2
+    }
+
+    Write-Host "=== WIM IMAGE MODE ===" -ForegroundColor Yellow
+    Write-Host "  Image: $WimPath (Index $WimIndex)" -ForegroundColor Cyan
+    Write-Host "  Mount: $MountDir" -ForegroundColor Cyan
+
+    if (!(Test-Path $MountDir)) { New-Item -Path $MountDir -ItemType Directory -Force | Out-Null }
+
+    $wimMounted = $false
+    $wimSave = $false
+    $defaultHiveLoaded = $false
+    $softwareHiveLoaded = $false
+    $removed = 0
+
+    try {
+    Write-Host "`n  Mounting image..." -ForegroundColor Gray
+    $mountResult = Mount-WindowsImage -ImagePath $WimPath -Index $WimIndex -Path $MountDir -EA Stop
+    if (-not $mountResult) {
+        throw "Failed to mount WIM image"
+    }
+    $wimMounted = $true
+    Write-Host "  Mounted successfully" -ForegroundColor Green
+
+    # Remove provisioned AppX packages from the offline image
+    Write-Host "`n  Removing provisioned AppX packages..." -ForegroundColor Gray
+    $provPkgs = Get-AppxProvisionedPackage -Path $MountDir -EA Stop
+    $removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { $script:configOverrides.RemovePatterns } else { $script:defaultRemovePatterns }
+    foreach ($pkg in $provPkgs) {
+        foreach ($pattern in $removePatterns) {
+            if ($pkg.DisplayName -like $pattern -or $pkg.PackageName -like $pattern) {
+                Remove-AppxProvisionedPackage -Path $MountDir -PackageName $pkg.PackageName -EA Stop | Out-Null
+                Write-Host "    Removed: $($pkg.DisplayName)" -ForegroundColor DarkGray
+                $removed++
+                break
+            }
+        }
+    }
+    Write-Host "  Removed $removed provisioned packages" -ForegroundColor Green
+
+    # Apply registry tweaks to the offline Default user hive
+    Write-Host "`n  Applying offline registry tweaks..." -ForegroundColor Gray
+    $offlineHive = "$MountDir\Users\Default\NTUSER.DAT"
+    if (Test-Path $offlineHive) {
+        $hiveName = "HKU\OfflineWIM"
+        reg load $hiveName $offlineHive 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $defaultHiveLoaded = $true
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SilentInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v ContentDeliveryAllowed /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v OemPreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v PreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v FeatureManagementEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Hidden /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAl /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$hiveName\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            [gc]::Collect()
+            Start-Sleep -Milliseconds 500
+            reg unload $hiveName 2>$null
+            $defaultHiveLoaded = $false
+            Write-Host "  Default user hive configured" -ForegroundColor Green
+        }
+    }
+
+    # Apply HKLM tweaks to the offline SOFTWARE hive
+    $offlineSW = "$MountDir\Windows\System32\config\SOFTWARE"
+    if (Test-Path $offlineSW) {
+        $swHive = "HKU\OfflineSW"
+        reg load $swHive $offlineSW 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $softwareHiveLoaded = $true
+            reg add "$swHive\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v DisableAIDataAnalysis /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v AllowRecallEnablement /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Windows\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
+            reg add "$swHive\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f 2>$null | Out-Null
+            [gc]::Collect()
+            Start-Sleep -Milliseconds 500
+            reg unload $swHive 2>$null
+            $softwareHiveLoaded = $false
+            Write-Host "  System policies configured" -ForegroundColor Green
+        }
+    }
+
+    $wimSave = $true
+    } catch {
+        Write-Host "ERROR: WIM mode failed: $_" -ForegroundColor Red
+        $wimSave = $false
+    } finally {
+        if ($defaultHiveLoaded) {
+            reg unload "HKU\OfflineWIM" 2>$null
+            $defaultHiveLoaded = $false
+        }
+        if ($softwareHiveLoaded) {
+            reg unload "HKU\OfflineSW" 2>$null
+            $softwareHiveLoaded = $false
+        }
+        if ($wimMounted) {
+            if ($wimSave) {
+                Write-Host "`n  Unmounting and saving image..." -ForegroundColor Gray
+                Dismount-WindowsImage -Path $MountDir -Save -EA 0 | Out-Null
+                Write-Host "  Image saved successfully" -ForegroundColor Green
+            } else {
+                Write-Host "`n  Unmounting and discarding failed WIM changes..." -ForegroundColor Yellow
+                Dismount-WindowsImage -Path $MountDir -Discard -EA 0 | Out-Null
+            }
+        }
+    }
+
+    if (-not $wimSave) { exit 2 }
+
+    Write-Host ""
+    Write-Host "=== WIM DEBLOAT COMPLETE ===" -ForegroundColor Green
+    Write-Host "  Removed: $removed AppX packages" -ForegroundColor White
+    Write-Host "  Applied: privacy, telemetry, UI, OOBE, and AI policy tweaks" -ForegroundColor White
+    Write-Host "  Image ready for deployment via DISM, MDT, or WDS" -ForegroundColor Cyan
+    exit 0
 }
 
 # ============================================================================
@@ -643,7 +675,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.3.4'
+    version   = 'v2.3.5'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
@@ -810,7 +842,7 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.3.4 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.3.5 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -1407,7 +1439,7 @@ try {
 if (-not $DryRun) {
     $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
     if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
-    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.4" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.5" -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
 }
@@ -1419,7 +1451,7 @@ $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.4") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.5") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('') | Out-Null
@@ -1561,7 +1593,7 @@ Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.3.4 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.3.5 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 
