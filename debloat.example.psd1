@@ -15,6 +15,7 @@
 #   FirewallRules       - Tab-delimited CSV string defining firewall rules
 #   DarkMode            - $true (default) to apply dark mode, $false to preserve user theme
 #   OemExclude          - Manufacturer names to exclude from OEM nuclear cleanup (e.g., @('Dell','HP'))
+#   ClearEventLogs      - Event log names to clear; default empty keeps audit/SIEM evidence
 
 @{
     # AppX packages to remove (wildcard patterns)
@@ -127,4 +128,12 @@
     # Add manufacturer names to skip during OEM nuclear cleanup
     # Useful when you need Dell BIOS utilities, HP Sure Click, etc.
     # OemExclude = @('Dell', 'HP')
+
+    # Event logs to clear during Privacy cleanup
+    # Risk: Caution -- clearing event logs removes audit/SIEM evidence from managed devices
+    # Default is empty; specify exact log names only when required by your deployment policy
+    # ClearEventLogs = @(
+    #     'Application',
+    #     'System'
+    # )
 }

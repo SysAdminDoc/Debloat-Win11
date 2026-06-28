@@ -294,6 +294,10 @@ Describe 'Config Override Mechanism' {
     It 'checks configOverrides for FirewallRules' {
         $allContent | Should -Match "configOverrides\.ContainsKey\('FirewallRules'\)"
     }
+
+    It 'checks configOverrides for ClearEventLogs' {
+        $allContent | Should -Match "configOverrides\.ContainsKey\('ClearEventLogs'\)"
+    }
 }
 
 Describe 'No Duplicate AppX Patterns' {
@@ -449,6 +453,30 @@ Describe 'DarkMode Config Override' {
     }
 }
 
+Describe 'Privacy Event Log Clearing' {
+    BeforeAll {
+        $privacyContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Privacy.ps1') -Raw
+        $exampleConfigContent = Get-Content (Join-Path $PSScriptRoot '..' 'debloat.example.psd1') -Raw
+    }
+
+    It 'does not enumerate and clear every event log by default' {
+        $privacyContent | Should -Not -Match 'wevtutil\s+el'
+        $privacyContent | Should -Match 'Event log clearing skipped'
+    }
+
+    It 'clears only configured event log names' {
+        $privacyContent | Should -Match "configOverrides\.ContainsKey\('ClearEventLogs'\)"
+        $privacyContent | Should -Match 'foreach \(\$eventLogName in \$clearEventLogs\)'
+        $privacyContent | Should -Match 'wevtutil cl "\$eventLogName"'
+    }
+
+    It 'documents ClearEventLogs as an empty-by-default caution setting' {
+        $exampleConfigContent | Should -Match 'ClearEventLogs'
+        $exampleConfigContent | Should -Match 'Default is empty'
+        $exampleConfigContent | Should -Match 'audit/SIEM evidence'
+    }
+}
+
 Describe 'OemExclude Config Override' {
     It 'script checks configOverrides for OemExclude' {
         $allContent | Should -Match "configOverrides\.ContainsKey\('OemExclude'\)"
@@ -513,7 +541,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.1'
+        $scriptContent | Should -Match 'Version.*v2\.3\.2'
     }
 
     It 'detection script checks registry first' {

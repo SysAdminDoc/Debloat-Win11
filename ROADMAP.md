@@ -2,13 +2,6 @@
 
 ## Research-Driven Additions
 
-- [ ] P0 - Make event-log clearing explicit opt-in
-  Why: Clearing every Windows event log conflicts with managed-device audit/SIEM expectations.
-  Evidence: `Modules/Privacy.ps1:37-39`, README EventLog/SIEM claims, O&O ShutUp10++ restore/audit positioning
-  Touches: `Modules/Privacy.ps1`, `Debloat-Win11.ps1`, `debloat.example.psd1`, `tests/Debloat-Win11.Tests.ps1`
-  Acceptance: Default `Privacy` no longer clears event logs; a documented config key enables targeted log clearing; DryRun reports the chosen behavior.
-  Complexity: M
-
 - [ ] P1 - Align WindowsAI policy scope and names with Microsoft docs
   Why: `DisableRecallDataProviders` is currently treated as HKLM/device policy, while Microsoft documents it as user-scope; newer connector and hardware-key policies are not represented.
   Evidence: `Modules/SystemTweaks_Privacy.ps1:48-56`, `Detect-Drift.ps1:22-26`, Microsoft WindowsAI Policy CSP

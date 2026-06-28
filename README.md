@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.1-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.2-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.1
+**Version:** v2.3.2
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,10 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.2
+- Event-log clearing is now explicit opt-in through the `ClearEventLogs` config key so managed-device audit/SIEM evidence is preserved by default
+- DryRun reports whether event logs would be skipped or which configured logs would be cleared
 
 ### New in v2.3.1
 - Fixed PowerShell 7 service cleanup so undo manifests preserve service startup types before parallel disable operations
@@ -331,7 +335,7 @@ The script runs in 12 configurable phases (selectable via `-Only` / `-Skip`) plu
 ├─────────────────────────────────────────────────────────────────┤
 │  PHASE 7/7: Privacy Cleanup                                     │
 │  • Browser cache                                                │
-│  • Event logs                                                   │
+│  • Event logs (only when ClearEventLogs is configured)          │
 │  • Diagnostic data                                              │
 ├─────────────────────────────────────────────────────────────────┤
 │  POST-OPERATIONS                                                │
@@ -1106,6 +1110,18 @@ EdgeBookmarks = @(
 )
 ```
 
+### Clearing Event Logs
+
+Event-log clearing is disabled by default to preserve audit and SIEM evidence on managed devices. Add `ClearEventLogs` to your config only when your deployment policy explicitly requires targeted log clearing:
+
+```powershell
+# In your .psd1 config file:
+ClearEventLogs = @(
+    'Application',
+    'System'
+)
+```
+
 ### Keeping a Service Running
 
 Remove it from `$servicesToDisable` array (around line 2030):
@@ -1264,6 +1280,14 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.2 (June 2026)
+
+**Bug Fixes:**
+- Event-log clearing is now opt-in through `ClearEventLogs` instead of clearing all Windows event logs by default.
+
+**Tests:**
+- Added Pester coverage for default event-log preservation, targeted log clearing, and config-key validation.
 
 ### Version 2.3.1 (June 2026)
 

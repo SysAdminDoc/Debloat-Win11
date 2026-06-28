@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.1
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.2
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -120,7 +120,7 @@ $script:phaseRationale = @{
     Office       = "Removes Office if no license is detected and no Office apps are running. Skipped automatically when in use."
     Edge         = "Applies 100+ Edge Group Policy settings to disable telemetry, Copilot, shopping, and ads. Sets Google as default search. Installs uBlock Origin."
     Firewall     = "Imports file/printer sharing rules. Additional vendor rules available via -ConfigPath."
-    Privacy      = "Clears browser caches, diagnostic logs, thumbnail cache, recent files, and event logs."
+    Privacy      = "Clears browser caches, diagnostic logs, thumbnail cache, and recent files. Event-log clearing is opt-in via -ConfigPath."
     Services     = "Disables 30+ telemetry, gaming, and unused services. Preserves critical services (IPv6, USB detection, biometrics, proxy)."
     Power        = "Sets hardware-aware power plan: High Performance for desktops, Balanced with smart battery for laptops."
     Network      = "Sets Private network profile, disables Nagle's algorithm for lower latency, enables network discovery."
@@ -562,7 +562,7 @@ if ($WimPath) {
 $script:configOverrides = @{}
 $script:validConfigKeys = @('RemovePatterns','ServicesToDisable','DefenderExclusions','EdgeBookmarks',
                             'StartupBloat','TasksToDisable','FeaturesToDisable','FirewallRules',
-                            'DarkMode','OemExclude')
+                            'DarkMode','OemExclude','ClearEventLogs')
 if ($ConfigPath) {
     if (!(Test-Path $ConfigPath)) {
         Write-Host "ERROR: Config file not found: $ConfigPath" -ForegroundColor Red
@@ -642,7 +642,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.3.1'
+    version   = 'v2.3.2'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
@@ -809,7 +809,7 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.3.1 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.3.2 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -1406,7 +1406,7 @@ try {
 if (-not $DryRun) {
     $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
     if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
-    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.1" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.2" -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
 }
@@ -1418,7 +1418,7 @@ $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.1") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.2") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('') | Out-Null
@@ -1560,7 +1560,7 @@ Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.3.1 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.3.2 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 

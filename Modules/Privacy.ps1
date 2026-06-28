@@ -1,10 +1,12 @@
 # ============================================================================
 # MODULE: Privacy Cleanup
-# Phase 7: Clear browser caches, diagnostics, thumbnails, recent files, event logs
+# Phase 7: Clear browser caches, diagnostics, thumbnails, recent files, optional event logs
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
 Write-Log "[Privacy] Running privacy cleanup..." "SECTION"
 Write-Rationale 'Privacy'
+
+$clearEventLogs = if ($script:configOverrides.ContainsKey('ClearEventLogs')) { @($script:configOverrides.ClearEventLogs) } else { @() }
 
 if (-not $DryRun) {
     # Clear browser caches
@@ -34,11 +36,20 @@ if (-not $DryRun) {
     Remove-Item "$env:APPDATA\Microsoft\Windows\Recent\AutomaticDestinations\*" -Force -EA 0
     Remove-Item "$env:APPDATA\Microsoft\Windows\Recent\CustomDestinations\*" -Force -EA 0
 
-    # Clear event logs
-    Write-Log "  Clearing event logs..." "INFO"
-    wevtutil el 2>$null | ForEach-Object { wevtutil cl "$_" 2>$null }
+    if ($clearEventLogs.Count -gt 0) {
+        Write-Log "  Clearing configured event logs: $($clearEventLogs -join ', ')" "INFO"
+        foreach ($eventLogName in $clearEventLogs) {
+            wevtutil cl "$eventLogName" 2>$null
+        }
+    } else {
+        Write-Log "  Event log clearing skipped (set ClearEventLogs in config to opt in)" "INFO"
+    }
 } else {
-    Write-Log "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, recent files, event logs" "INFO"
+    if ($clearEventLogs.Count -gt 0) {
+        Write-Log "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, recent files, and configured event logs: $($clearEventLogs -join ', ')" "INFO"
+    } else {
+        Write-Log "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, and recent files; event log clearing would be skipped" "INFO"
+    }
 }
 
 # Disable app usage tracking
