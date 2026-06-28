@@ -544,7 +544,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.3'
+        $scriptContent | Should -Match 'Version.*v2\.3\.4'
     }
 
     It 'detection script checks registry first' {
@@ -585,6 +585,27 @@ Describe 'RemoveDefaultMicrosoftStorePackages Policy' {
         $allContent | Should -Match 'Microsoft\.Copilot_8wekyb3d8bbwe'
         $allContent | Should -Match 'Microsoft\.Windows\.Ai\.Copilot\.Provider_8wekyb3d8bbwe'
         $allContent | Should -Match 'MicrosoftWindows\.CrossDevice_cw5n1h2txyewy'
+    }
+
+    It 'validates PFN formatting before writing policy values' {
+        $allContent | Should -Match 'invalidPfns'
+        $allContent | Should -Match '\^\[A-Za-z0-9\]\[A-Za-z0-9\.\]\+_\[A-Za-z0-9\]\+\$'
+    }
+
+    It 'emits Microsoft-compatible DynamicRemovalList payload' {
+        $allContent | Should -Match 'DynamicRemovalList'
+        $allContent | Should -Match '&#x0D;&#x0A;'
+        $allContent | Should -Match '<enabled/><data id=""DynamicRemovalList""'
+    }
+
+    It 'warns about GPO and Intune OMA-URI conflict risk' {
+        $allContent | Should -Match 'Intune OMA-URI'
+        $allContent | Should -Match 'GPO registry'
+    }
+
+    It 'keeps RemoveDefaultMicrosoftStorePackages registry creation behind DryRun' {
+        $allContent | Should -Match 'if \(-not \$DryRun -and !\(Test-Path \$pfnPath\)\)'
+        $allContent | Should -Match '\[DRY RUN\].*registry shape'
     }
 }
 

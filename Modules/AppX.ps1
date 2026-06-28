@@ -37,7 +37,7 @@ if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
     $policyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx"
     Set-Reg -Path $policyPath -Name "RemoveDefaultMicrosoftStorePackages" -Value 1
     $pfnPath = "$policyPath\RemoveDefaultMicrosoftStorePackages"
-    if (!(Test-Path $pfnPath)) { New-Item -Path $pfnPath -Force | Out-Null }
+    if (-not $DryRun -and !(Test-Path $pfnPath)) { New-Item -Path $pfnPath -Force | Out-Null }
     $storePfns = @(
         'Clipchamp.Clipchamp_yxz26nhyzhsrt',
         'Microsoft.BingNews_8wekyb3d8bbwe',
@@ -71,10 +71,31 @@ if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
         'Microsoft.XboxSpeechToTextOverlay_8wekyb3d8bbwe',
         'Microsoft.ZuneMusic_8wekyb3d8bbwe'
     )
+    $invalidPfns = $storePfns | Where-Object { $_ -notmatch '^[A-Za-z0-9][A-Za-z0-9.]+_[A-Za-z0-9]+$' }
+    if ($invalidPfns.Count -gt 0) {
+        Write-Log "  WARNING: RemoveDefaultMicrosoftStorePackages PFN validation failed: $($invalidPfns -join ', ')" "WARNING"
+    }
+    $dynamicRemovalList = $storePfns -join '&#x0D;&#x0A;'
+    $storeRemovalCspPayload = "<enabled/><data id=""DynamicRemovalList"" value=""$dynamicRemovalList""/>"
+    Write-Log "  RemoveDefaultMicrosoftStorePackages CSP payload: $storeRemovalCspPayload" "INFO"
+    Write-Log "  WARNING: Do not deploy both GPO registry and Intune OMA-URI payloads for RemoveDefaultMicrosoftStorePackages on the same device" "WARNING"
     $idx = 1
     foreach ($pfn in $storePfns) {
         Set-Reg -Path $pfnPath -Name "$idx" -Value $pfn -Type "String"
         $idx++
+    }
+    if (-not $DryRun) {
+        $writtenPfns = 1..$storePfns.Count | ForEach-Object {
+            $entry = Get-ItemProperty -Path $pfnPath -Name "$_" -EA 0
+            if ($entry) { $entry."$_" }
+        }
+        if (@($writtenPfns).Count -ne $storePfns.Count) {
+            Write-Log "  WARNING: RemoveDefaultMicrosoftStorePackages registry validation wrote $(@($writtenPfns).Count)/$($storePfns.Count) PFNs" "WARNING"
+        } else {
+            Write-Log "  RemoveDefaultMicrosoftStorePackages registry validation passed ($($storePfns.Count) PFNs)" "INFO"
+        }
+    } else {
+        Write-Log "  [DRY RUN] Would validate RemoveDefaultMicrosoftStorePackages registry shape after writing $($storePfns.Count) PFNs" "INFO"
     }
     Write-Log "  RemoveDefaultMicrosoftStorePackages policy set ($($storePfns.Count) packages)" "INFO"
 }

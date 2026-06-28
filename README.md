@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.3-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.4-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.3
+**Version:** v2.3.4
 **Author:** SysAdminDoc
 **Last Updated:** June 2026
 **Lines of Code:** ~3,800
@@ -57,6 +57,11 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 ---
 
 ## Features at a Glance
+
+### New in v2.3.4
+- RemoveDefaultMicrosoftStorePackages now validates package-family-name formatting before writing numbered registry values
+- Enterprise/Education 24H2+ runs log a Microsoft-compatible `DynamicRemovalList` CSP payload for Intune OMA-URI packaging
+- The script warns when mixing GPO registry and Intune OMA-URI policy delivery could create conflict risk
 
 ### New in v2.3.3
 - WindowsAI policy application, drift detection, and remediation now share `Modules/WindowsAiPolicies.psd1`
@@ -1031,6 +1036,7 @@ switch ($result.ExitCode) {
 2. Install command: `powershell.exe -ExecutionPolicy Bypass -File "Debloat-Win11.ps1"`
 3. Detection rule: File exists `%ProgramData%\Debloat-Win11\Logs\Debloat-*.log`
 4. Requirements: Windows 10 1903+
+5. For policy-based inbox app removal, use either the logged `DynamicRemovalList` OMA-URI payload or local GPO-compatible registry delivery, not both on the same device.
 
 ### SCCM/ConfigMgr
 
@@ -1285,6 +1291,11 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 ---
 
 ## Changelog
+
+### Version 2.3.4 (June 2026)
+
+**New Features:**
+- Added PFN validation, `DynamicRemovalList` CSP payload logging, registry-shape validation, and conflict warnings for RemoveDefaultMicrosoftStorePackages.
 
 ### Version 2.3.3 (June 2026)
 

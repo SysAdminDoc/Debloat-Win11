@@ -2,13 +2,6 @@
 
 ## Research-Driven Additions
 
-- [ ] P1 - Validate and package RemoveDefaultMicrosoftStorePackages policy output
-  Why: Microsoft documents CSP XML/static IDs/dynamic PFN list behavior and GPO/MDM conflict rules that need validation against the direct registry writes.
-  Evidence: `Modules/AppX.ps1:34-80`, Microsoft policy-based in-box app removal docs
-  Touches: `Modules/AppX.ps1`, `Debloat-Win11.ps1`, `tests/Debloat-Win11.Tests.ps1`, README deployment section
-  Acceptance: Script can emit or log a Microsoft-compatible policy payload, validates registry shape on supported Enterprise/Education builds, warns on MDM/GPO conflict risk, and includes tests for PFN formatting.
-  Complexity: M
-
 - [ ] P1 - Add WIM-mode failure cleanup and config parity
   Why: Offline image mode can leave mounts behind on failure and ignores `-ConfigPath` remove patterns.
   Evidence: `Debloat-Win11.ps1:458-547`, Winhance ISO tooling, tiny11builder offline servicing pattern
