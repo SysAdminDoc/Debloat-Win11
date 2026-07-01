@@ -7,6 +7,7 @@ CLAUDE.md
 # Markdown files local-only (except README)
 *.md
 !README.md
+!CHANGELOG.md
 
 # AI config
 CODEX_CHANGELOG.md
