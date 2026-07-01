@@ -40,9 +40,6 @@ foreach ($policy in ($windowsAiPolicies | Where-Object { $_.Scope -eq 'Device' -
 Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "DisableWebSearch" -Value 1
 Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" -Name "DisableWindowsConsumerFeatures" -Value 1
 Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAndInterests" -Value 0
-Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableImageCreator" -Value 1
-Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableGenerativeFill" -Value 1
-Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableCocreator" -Value 1
 Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "DiagnosticData" -Value 0
 Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "EdgeCopilotEnabled" -Value 0
 Set-RegRemediate -Path "HKLM:\SOFTWARE\Policies\Microsoft\Edge" -Name "HubsSidebarEnabled" -Value 0

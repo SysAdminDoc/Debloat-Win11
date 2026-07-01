@@ -599,7 +599,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.8'
+        $scriptContent | Should -Match 'Version.*v2\.3\.9'
     }
 
     It 'detection script checks registry first' {
@@ -932,5 +932,82 @@ Describe 'PSScriptAnalyzer Gate' {
     It 'fails the local gate on analyzer errors' {
         $gateContent | Should -Match "Severity -eq 'Error'"
         $gateContent | Should -Match 'Write-Error "PSScriptAnalyzer found'
+    }
+}
+
+Describe 'Lockfile Stale PID Detection' {
+    It 'checks PID from lockfile content before aborting' {
+        $scriptContent | Should -Match 'PID=\(\\d\+\)'
+        $scriptContent | Should -Match 'Get-Process -Id \$lockPid'
+        $scriptContent | Should -Match '\$staleLock'
+    }
+
+    It 'removes stale lockfile instead of aborting' {
+        $scriptContent | Should -Match 'Removing stale lock file'
+    }
+
+    It 'captures lockfile path for event handler closure' {
+        $scriptContent | Should -Match '\$lockFilePath = \$script:lockFile'
+        $scriptContent | Should -Match 'Remove-Item \$lockFilePath'
+    }
+}
+
+Describe 'Revert Script String Value Quoting' {
+    It 'quotes string old_value in generated revert script' {
+        $scriptContent | Should -Match "escapedValue.*if.*'String'"
+    }
+}
+
+Describe 'Service Deduplication' {
+    It 'does not double-disable telemetry services in SystemTweaks_Privacy' {
+        $privacyContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'SystemTweaks_Privacy.ps1') -Raw
+        $privacyContent | Should -Not -Match 'Disable-ServiceDryRun.*DiagTrack'
+        $privacyContent | Should -Not -Match 'Disable-ServiceDryRun.*dmwappushservice'
+    }
+}
+
+Describe 'Temp Cleanup Phase Gating' {
+    It 'gates temp file cleanup behind Privacy phase check' {
+        $servicesContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Services.ps1') -Raw
+        $servicesContent | Should -Match "Test-PhaseEnabled 'Privacy'"
+    }
+}
+
+Describe 'Shared AI Policy Map Coverage' {
+    BeforeAll {
+        $policyFile = Join-Path $PSScriptRoot '..' 'Modules' 'WindowsAiPolicies.psd1'
+        $policies = & ([scriptblock]::Create((Get-Content $policyFile -Raw)))
+    }
+
+    It 'includes Paint AI policies in the shared map' {
+        $paintPolicies = $policies | Where-Object { $_.Path -match 'Paint' }
+        $paintPolicies.Count | Should -BeGreaterOrEqual 3
+    }
+
+    It 'includes Notepad AI policy in the shared map' {
+        $notepadPolicies = $policies | Where-Object { $_.Path -match 'Notepad' }
+        $notepadPolicies.Count | Should -BeGreaterOrEqual 1
+    }
+
+    It 'no longer hardcodes Paint or Notepad policies in drift detection' {
+        $detectContent = Get-Content (Join-Path $PSScriptRoot '..' 'Detect-Drift.ps1') -Raw
+        $detectContent | Should -Not -Match 'DisableCocreator'
+        $detectContent | Should -Not -Match 'DisableImageCreator'
+    }
+}
+
+Describe 'OneDrive Multi-Profile Safety' {
+    It 'checks for files before deleting per-profile OneDrive folders' {
+        $oneDriveContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'OneDrive.ps1') -Raw
+        $oneDriveContent | Should -Match 'Get-ChildItem.*Recurse.*File'
+        $oneDriveContent | Should -Match 'contains files'
+    }
+}
+
+Describe 'Firewall Program Parameter' {
+    It 'does not filter out Program=System from firewall rules' {
+        $firewallContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Firewall.ps1') -Raw
+        $firewallContent | Should -Not -Match "Program -ne 'System'"
+        $firewallContent | Should -Match "Program -ne 'Any'"
     }
 }

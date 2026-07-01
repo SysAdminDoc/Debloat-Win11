@@ -116,7 +116,6 @@ foreach ($userProf in $userProfiles) {
     [gc]::Collect()
     Start-Sleep -Milliseconds 200
     reg unload $hiveName 2>$null
-    $count++
     Write-MaintainLog "  Applied tweaks to profile: $($userProf.Name)"
 }
 

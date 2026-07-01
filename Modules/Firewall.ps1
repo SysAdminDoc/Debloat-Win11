@@ -46,7 +46,7 @@ if (-not $DryRun) {
             if ($rule.Protocol -and $rule.Protocol -ne 'Any') { $params.Protocol = $rule.Protocol }
             if ($rule.LocalPort -and $rule.LocalPort -ne 'Any') { $params.LocalPort = $rule.LocalPort }
             if ($rule.RemotePort -and $rule.RemotePort -ne 'Any') { $params.RemotePort = $rule.RemotePort }
-            if ($rule.Program -and $rule.Program -ne 'System') { $params.Program = $rule.Program }
+            if ($rule.Program -and $rule.Program -ne 'Any') { $params.Program = $rule.Program }
 
             New-NetFirewallRule @params -EA Stop | Out-Null
             $successCount++

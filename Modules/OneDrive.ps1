@@ -33,9 +33,14 @@
             if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
         }
 
-        # Clean OneDrive from all user profiles
+        # Clean OneDrive from all user profiles (skip profiles with active OneDrive files)
         $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
         foreach ($userProf in $userProfiles) {
+            $profileOneDrive = "$($userProf.FullName)\OneDrive"
+            if ((Test-Path $profileOneDrive) -and (Get-ChildItem $profileOneDrive -Recurse -File -EA 0 | Select-Object -First 1)) {
+                Write-Log "  Skipping $($userProf.Name) OneDrive folder (contains files)" "WARNING"
+                continue
+            }
             @(
                 "$($userProf.FullName)\AppData\Local\Microsoft\OneDrive",
                 "$($userProf.FullName)\OneDrive"

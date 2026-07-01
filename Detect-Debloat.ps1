@@ -7,7 +7,7 @@
 #   Script file: Detect-Debloat.ps1
 #   Run script as 32-bit process: No
 
-$expectedVersion = 'v2.3.8'
+$expectedVersion = 'v2.3.9'
 $logDir = "$env:ProgramData\Debloat-Win11\Logs"
 
 # Check registry stamp first (survives file cleanup, compatible with Intune native rules)

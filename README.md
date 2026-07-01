@@ -2,11 +2,11 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.8-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.9-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.8
+**Version:** v2.3.9
 **Author:** SysAdminDoc
-**Last Updated:** June 2026
+**Last Updated:** July 2026
 **Lines of Code:** ~3,800
 **Compatibility:** Windows 10 (1903+) / Windows 11 (including 24H2/25H2/26H1)
 
@@ -58,9 +58,16 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 
 ## Features at a Glance
 
-### New in v2.3.8
-- Expanded Pester behavior tests with mocks for service mutation, event-log clearing, WIM cleanup, registry writes, and report generation
-- The destructive-operation checks run locally without stopping services, clearing logs, mounting images, editing registry state, or writing reports
+### New in v2.3.9
+- Lockfile now detects stale PIDs from crashed runs instead of permanently blocking
+- Revert scripts properly quote string registry values (paths, "Deny", etc.)
+- Eliminated double-disable of DiagTrack, dmwappushservice, lfsvc, and Fax between privacy and services phases
+- Temp file cleanup now respects `-Only`/`-Skip` phase selection (gated by Privacy phase)
+- Firewall rules correctly pass `Program=System` for kernel-level file/printer sharing rules
+- OneDrive removal checks per-profile file count before deleting multi-user folders
+- Paint and Notepad AI policies unified into `WindowsAiPolicies.psd1` shared map for drift/remediation parity
+- Maintenance script counter now accurately reports individual settings re-applied
+- Drift detection reports total checks performed alongside OK/drifted/missing counts
 
 ### New in v2.3.7
 - Added local PSScriptAnalyzer settings with PowerShell 5.1 compatibility rules
@@ -1315,6 +1322,24 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 
 ## Changelog
 
+### Version 2.3.9 (July 2026)
+
+**Bug Fixes:**
+- Fixed stale lockfile from crashed runs permanently blocking future executions — now detects dead PIDs and auto-recovers.
+- Fixed revert script generation producing broken PowerShell for string registry values.
+- Removed double-disable of DiagTrack, dmwappushservice, lfsvc, and Fax between SystemTweaks and Services phases.
+- Temp file cleanup now respects `-Only`/`-Skip` phase selection.
+- Firewall rules now correctly pass `Program=System` for kernel-level rules.
+- OneDrive removal checks per-profile file count before deleting across user profiles.
+- Maintenance script counter accurately reports individual settings re-applied.
+
+**New Features:**
+- Paint and Notepad AI policies unified into shared `WindowsAiPolicies.psd1` map for automatic drift/remediation coverage.
+- Drift detection reports total checks performed alongside status counts.
+
+**Tests:**
+- Added Pester coverage for lockfile stale PID, revert script quoting, service dedup, temp cleanup gating, shared AI map, OneDrive safety, and firewall Program handling.
+
 ### Version 2.3.8 (June 2026)
 
 **Tests:**
@@ -1445,4 +1470,4 @@ This script is provided as-is. No warranty is provided. Test in a non-production
 
 ---
 
-*Documentation last updated: June 28, 2026*
+*Documentation last updated: July 1, 2026*

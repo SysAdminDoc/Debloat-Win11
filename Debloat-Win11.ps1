@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.8
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.9
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -57,9 +57,6 @@ if ($CheckDrift) {
         @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Expected = 0 }
         # AI & Copilot
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Expected = 1 }
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableCocreator'; Expected = 1 }
-        @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableImageCreator'; Expected = 1 }
-        @{ Path = 'HKLM:\SOFTWARE\Policies\WindowsNotepad'; Name = 'DisableAIFeatures'; Expected = 1 }
         @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Expected = 0 }
         # Consumer features & ads
         @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; Name = 'DisableWindowsConsumerFeatures'; Expected = 1 }
@@ -103,7 +100,7 @@ if ($CheckDrift) {
         }
     }
     Write-Host ""
-    Write-Host "  OK: $ok | Drifted: $drifted | Missing: $missing" -ForegroundColor $(if ($drifted + $missing -gt 0) { 'Yellow' } else { 'Green' })
+    Write-Host "  Checked: $($driftChecks.Count) | OK: $ok | Drifted: $drifted | Missing: $missing" -ForegroundColor $(if ($drifted + $missing -gt 0) { 'Yellow' } else { 'Green' })
     if ($drifted + $missing -gt 0) {
         Write-Host "  Re-run the script to re-apply drifted settings." -ForegroundColor Cyan
     } else {
@@ -675,7 +672,7 @@ $script:counters = @{
 
 $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.3.8'
+    version   = 'v2.3.9'
     dryrun    = $DryRun.IsPresent
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
@@ -825,8 +822,21 @@ function Disable-TaskDryRun {
 $script:lockFile = "$LogDir\Debloat-Win11.lock"
 if (Test-Path $script:lockFile) {
     $lockContent = Get-Content $script:lockFile -Raw -EA 0
-    Write-Log "ERROR: Another instance is already running (lock: $lockContent). Aborting." "ERROR"
-    exit 2
+    $staleLock = $false
+    if ($lockContent -match 'PID=(\d+)') {
+        $lockPid = [int]$Matches[1]
+        $lockProc = Get-Process -Id $lockPid -EA 0
+        if (-not $lockProc) { $staleLock = $true }
+    } else {
+        $staleLock = $true
+    }
+    if ($staleLock) {
+        Write-Log "Removing stale lock file from a previous crashed run" "WARNING"
+        Remove-Item $script:lockFile -Force -EA 0
+    } else {
+        Write-Log "ERROR: Another instance is already running (lock: $lockContent). Aborting." "ERROR"
+        exit 2
+    }
 }
 try {
     "PID=$PID Started=$(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')" | Set-Content $script:lockFile -Force -EA Stop
@@ -834,15 +844,15 @@ try {
     Write-Log "ERROR: Could not create lock file: $_" "ERROR"
     exit 2
 }
-# Ensure lockfile is cleaned up on exit (normal or abnormal)
+$lockFilePath = $script:lockFile
 Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    Remove-Item $script:lockFile -Force -EA 0
+    Remove-Item $lockFilePath -Force -EA 0
 } | Out-Null
 
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.3.8 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.3.9 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -1105,8 +1115,6 @@ if ($battery) {
     }
 }
 
-# Get system info for display
-$computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -EA 0
 $manufacturer = $computerSystem.Manufacturer
 $model = $computerSystem.Model
 
@@ -1439,7 +1447,7 @@ try {
 if (-not $DryRun) {
     $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
     if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
-    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.8" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.9" -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
 }
@@ -1451,7 +1459,7 @@ $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.8") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.9") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('') | Out-Null
@@ -1463,8 +1471,9 @@ try {
             $revertLines.Add("Remove-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Force -EA 0") | Out-Null
         } else {
             $type = if ($entry.type) { $entry.type } else { 'DWord' }
+            $escapedValue = if ($type -eq 'String') { "'$($entry.old_value -replace "'","''")'" } else { $entry.old_value }
             $revertLines.Add("if (!(Test-Path '$($entry.path)')) { New-Item -Path '$($entry.path)' -Force | Out-Null }") | Out-Null
-            $revertLines.Add("Set-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Value $($entry.old_value) -Type $type -Force -EA 0") | Out-Null
+            $revertLines.Add("Set-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Value $escapedValue -Type $type -Force -EA 0") | Out-Null
         }
     }
     $revertLines.Add('') | Out-Null
@@ -1610,7 +1619,7 @@ Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.3.8 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.3.9 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 

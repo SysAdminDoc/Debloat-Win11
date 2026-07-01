@@ -14,17 +14,11 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" 
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Siuf\Rules" -Name "NumberOfSIUFInPeriod" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Clipboard" -Name "EnableClipboardHistory" -Value 0
 
-# Disable telemetry services (routed through helper for manifest tracking)
-@("DiagTrack", "dmwappushservice", "lfsvc", "Fax") | ForEach-Object {
-    Disable-ServiceDryRun -ServiceName $_
-}
-
 # Disable Copilot, Cortana, Recall
 Write-Log "  Disabling Copilot, Cortana, Recall..." "INFO"
 Set-Reg -Path "HKCU:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" -Name "TurnOffWindowsCopilot" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search" -Name "AllowCortana" -Value 0
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\WindowsNotepad" -Name "DisableAIFeatures" -Value 1
 
 # ============================================================================
 # WINDOWS 11 24H2/25H2/26H1 BLOAT
@@ -43,11 +37,6 @@ if (-not $DryRun) {
         Disable-WindowsOptionalFeature -Online -FeatureName "Recall" -NoRestart -EA 0 | Out-Null
     }
 }
-
-# --- Disable Paint AI features (Cocreator, Image Creator, Generative Fill) ---
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableImageCreator" -Value 1
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableGenerativeFill" -Value 1
-Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Paint" -Name "DisableCocreator" -Value 1
 
 # --- Disable IsoEnvBroker (Agent Workspaces) ---
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Services\IsoEnvBroker" -Name "Enabled" -Value 0

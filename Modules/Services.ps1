@@ -114,8 +114,9 @@ Write-Log "  Bloatware services disabled" "SUCCESS"
 } else { Write-Log "[Services] SKIPPED (phase excluded)" "INFO" }
 
 # ============================================================================
-# TEMP FILE CLEANUP
+# TEMP FILE CLEANUP (runs with Privacy phase)
 # ============================================================================
+if (Test-PhaseEnabled 'Privacy') {
 Write-Log "[Cleanup] Clearing temp files..." "SECTION"
 
 if (-not $DryRun) {
@@ -143,3 +144,4 @@ if (-not $DryRun) {
 }
 
 Write-Log "  Temp files cleared" "SUCCESS"
+} else { Write-Log "[Cleanup] Temp cleanup SKIPPED (Privacy phase excluded)" "INFO" }
