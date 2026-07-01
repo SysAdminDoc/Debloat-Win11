@@ -192,8 +192,7 @@ Write-Log "  Optional features configured" "SUCCESS"
 if ($AllUsers -and -not $DryRun) {
     Write-Log "[AllUsers] Applying HKCU tweaks to all user profiles..." "SECTION"
 
-    $hkcuDataFile = Join-Path $PSScriptRoot 'Modules\HkcuTweaks.psd1'
-    if (!(Test-Path $hkcuDataFile)) { $hkcuDataFile = Join-Path $PSScriptRoot 'HkcuTweaks.psd1' }
+    $hkcuDataFile = Join-Path $PSScriptRoot 'HkcuTweaks.psd1'
     if (Test-Path $hkcuDataFile) {
         $hkcuTweaks = & ([scriptblock]::Create((Get-Content $hkcuDataFile -Raw)))
     } else {
