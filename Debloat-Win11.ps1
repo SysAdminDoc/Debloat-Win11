@@ -1467,13 +1467,15 @@ try {
     $regEntries = @($script:manifest.changes.registry_set)
     [array]::Reverse($regEntries)
     foreach ($entry in $regEntries) {
+        $escapedPath = $entry.path -replace "'","''"
+        $escapedName = $entry.name -replace "'","''"
         if ($null -eq $entry.old_value) {
-            $revertLines.Add("Remove-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Force -EA 0") | Out-Null
+            $revertLines.Add("Remove-ItemProperty -Path '$escapedPath' -Name '$escapedName' -Force -EA 0") | Out-Null
         } else {
             $type = if ($entry.type) { $entry.type } else { 'DWord' }
             $escapedValue = if ($type -eq 'String') { "'$($entry.old_value -replace "'","''")'" } else { $entry.old_value }
-            $revertLines.Add("if (!(Test-Path '$($entry.path)')) { New-Item -Path '$($entry.path)' -Force | Out-Null }") | Out-Null
-            $revertLines.Add("Set-ItemProperty -Path '$($entry.path)' -Name '$($entry.name)' -Value $escapedValue -Type $type -Force -EA 0") | Out-Null
+            $revertLines.Add("if (!(Test-Path '$escapedPath')) { New-Item -Path '$escapedPath' -Force | Out-Null }") | Out-Null
+            $revertLines.Add("Set-ItemProperty -Path '$escapedPath' -Name '$escapedName' -Value $escapedValue -Type $type -Force -EA 0") | Out-Null
         }
     }
     $revertLines.Add('') | Out-Null
@@ -1481,13 +1483,15 @@ try {
     foreach ($svcEntry in $script:manifest.changes.services_disabled) {
         $sName = if ($svcEntry -is [string]) { $svcEntry } else { $svcEntry.name }
         $sType = if ($svcEntry -is [string]) { 'Manual' } else { $svcEntry.original_startup_type }
-        $revertLines.Add("Set-Service -Name '$sName' -StartupType $sType -EA 0") | Out-Null
-        $revertLines.Add("Start-Service -Name '$sName' -EA 0") | Out-Null
+        $escapedSvc = $sName -replace "'","''"
+        $revertLines.Add("Set-Service -Name '$escapedSvc' -StartupType $sType -EA 0") | Out-Null
+        $revertLines.Add("Start-Service -Name '$escapedSvc' -EA 0") | Out-Null
     }
     $revertLines.Add('') | Out-Null
 
     foreach ($taskName in $script:manifest.changes.tasks_disabled) {
-        $revertLines.Add("Get-ScheduledTask -TaskName '$taskName' -EA 0 | Enable-ScheduledTask -EA 0") | Out-Null
+        $escapedTask = $taskName -replace "'","''"
+        $revertLines.Add("Get-ScheduledTask -TaskName '$escapedTask' -EA 0 | Enable-ScheduledTask -EA 0") | Out-Null
     }
     $revertLines.Add('') | Out-Null
     $revertLines.Add('Write-Host "Revert complete. Restart recommended." -ForegroundColor Green') | Out-Null

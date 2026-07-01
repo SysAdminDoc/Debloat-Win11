@@ -146,13 +146,15 @@ if (-not $DryRun) {
                         })
                     }
 
-                    # Get max ID
+                    # Get max ID across all bookmark roots
                     $script:maxId = 1
                     function Get-MaxBookmarkId($node) {
                         if ($node.id) { $id = [int]$node.id; if ($id -gt $script:maxId) { $script:maxId = $id } }
                         if ($node.children) { foreach ($child in $node.children) { Get-MaxBookmarkId $child } }
                     }
-                    Get-MaxBookmarkId $content.roots.bookmark_bar
+                    foreach ($rootName in @('bookmark_bar','other','synced')) {
+                        if ($content.roots.$rootName) { Get-MaxBookmarkId $content.roots.$rootName }
+                    }
 
                     # Bookmarks to add (use -ConfigPath for vendor-specific bookmarks)
                     $edgeBookmarks = if ($script:configOverrides.ContainsKey('EdgeBookmarks')) { $script:configOverrides.EdgeBookmarks } else { @(
@@ -166,7 +168,7 @@ if (-not $DryRun) {
                     }
 
                     # Add new bookmarks
-                    $timestamp = [math]::Floor((Get-Date -UFormat %s)) * 1000000
+                    $timestamp = ([math]::Floor([double](Get-Date -UFormat %s)) + 11644473600) * 1000000
                     $newBookmarks = @()
                     foreach ($bm in $edgeBookmarks) {
                         $normalizedUrl = $bm.url.TrimEnd('/').ToLower()
