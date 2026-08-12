@@ -2,6 +2,8 @@
 # and Debloat-Win11-Maintain.ps1 (post-update re-application).
 # Add new HKCU tweaks here -- both scripts pick them up automatically.
 # Path is relative to HKU hive root (no HKCU:\ prefix).
+# Type is optional and uses registry-provider names (DWord, String, ExpandString,
+# MultiString, Binary, or QWord); omitted Type defaults to DWord.
 @(
     @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Value = 0 }
     @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Value = 0 }

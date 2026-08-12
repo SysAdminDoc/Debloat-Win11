@@ -93,9 +93,39 @@ if (Test-Path $hkcuDataFile) {
     )
 }
 
-# Apply to currently-logged-in user via HKCU (covers the interactive session)
-foreach ($tweak in $hkcuTweaks) {
-    Set-RegMaintain -Path "HKCU:\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value
+function Get-HkcuTweakType {
+    param([hashtable]$Tweak)
+    if ($Tweak.ContainsKey('Type') -and $Tweak.Type) { return [string]$Tweak.Type }
+    return 'DWord'
+}
+
+function Get-LoadedUserHivePath {
+    param([Parameter(Mandatory)][string]$ProfilePath)
+
+    $normalizedProfilePath = $ProfilePath.TrimEnd('\')
+    $profileRecord = Get-CimInstance -ClassName Win32_UserProfile -EA 0 |
+        Where-Object {
+            $_.Loaded -and $_.SID -and $_.LocalPath -and
+            ($_.LocalPath.TrimEnd('\') -ieq $normalizedProfilePath)
+        } | Select-Object -First 1
+
+    if ($profileRecord) {
+        $hivePath = "Registry::HKEY_USERS\$($profileRecord.SID)"
+        if (Test-Path $hivePath) { return $hivePath }
+    }
+
+    # Fall back to the loaded HKU hives when WMI does not report the profile.
+    foreach ($hive in @(Get-ChildItem 'Registry::HKEY_USERS' -EA 0 | Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' })) {
+        $profileList = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($hive.PSChildName)" -Name ProfileImagePath -EA 0
+        if ($profileList) {
+            $imagePath = [Environment]::ExpandEnvironmentVariables([string]$profileList.ProfileImagePath).TrimEnd('\')
+            if ($imagePath -ieq $normalizedProfilePath) {
+                return "Registry::HKEY_USERS\$($hive.PSChildName)"
+            }
+        }
+    }
+
+    return $null
 }
 
 # Apply to all user profile NTUSER.DAT files (covers users not currently logged in)
@@ -104,13 +134,24 @@ foreach ($userProf in $userProfiles) {
     $ntuser = "$($userProf.FullName)\NTUSER.DAT"
     if (!(Test-Path $ntuser)) { continue }
 
-    $hiveName = "HKU\Maintain_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
+    $loadedHivePath = Get-LoadedUserHivePath -ProfilePath $userProf.FullName
+    if ($loadedHivePath) {
+        foreach ($tweak in $hkcuTweaks) {
+            $tweakType = Get-HkcuTweakType -Tweak $tweak
+            Set-RegMaintain -Path "$loadedHivePath\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
+        }
+        Write-MaintainLog "  Applied tweaks to logged-in profile: $($userProf.Name)"
+        continue
+    }
+
+    $hiveKey = "Maintain_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
+    $hiveName = "HKU\$hiveKey"
     reg load $hiveName $ntuser 2>$null
     if ($LASTEXITCODE -ne 0) { continue }
 
     foreach ($tweak in $hkcuTweaks) {
-        $regPath = "$hiveName\$($tweak.Path)"
-        reg add $regPath /v $tweak.Name /t REG_DWORD /d $tweak.Value /f 2>$null | Out-Null
+        $tweakType = Get-HkcuTweakType -Tweak $tweak
+        Set-RegMaintain -Path "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
     }
 
     [gc]::Collect()
@@ -122,11 +163,13 @@ foreach ($userProf in $userProfiles) {
 # Also apply to Default profile (new user accounts)
 $defaultHive = "C:\Users\Default\NTUSER.DAT"
 if (Test-Path $defaultHive) {
-    $hiveName = "HKU\Maintain_Default"
+    $hiveKey = 'Maintain_Default'
+    $hiveName = "HKU\$hiveKey"
     reg load $hiveName $defaultHive 2>$null
     if ($LASTEXITCODE -eq 0) {
         foreach ($tweak in $hkcuTweaks) {
-            reg add "$hiveName\$($tweak.Path)" /v $tweak.Name /t REG_DWORD /d $tweak.Value /f 2>$null | Out-Null
+            $tweakType = Get-HkcuTweakType -Tweak $tweak
+            Set-RegMaintain -Path "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
         }
         [gc]::Collect()
         Start-Sleep -Milliseconds 200

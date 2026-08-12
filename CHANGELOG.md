@@ -2,6 +2,16 @@
 
 All notable changes to Debloat-Win11 will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Maintenance and drift remediation now apply HKCU tweaks directly to already-loaded user hives, including profiles active while the task runs as SYSTEM.
+- Shared HKCU propagation honors optional registry `Type` metadata instead of forcing every value to `REG_DWORD`.
+- AppX removal counters now include provisioned-only packages while avoiding duplicate manifest entries.
+
+### Tests
+- Added coverage for loaded-profile propagation, typed HKCU writes, and provisioned-only AppX counting.
+
 ## [v2.3.9] - 2026-07-01
 
 ### Fixed

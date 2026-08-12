@@ -205,11 +205,15 @@ if ($AllUsers -and -not $DryRun) {
     foreach ($userProf in $userProfiles) {
         $ntuser = "$($userProf.FullName)\NTUSER.DAT"
         if (!(Test-Path $ntuser)) { continue }
-        $hiveName = "HKU\AllUsers_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
+        $hiveKey = "AllUsers_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
+        $hiveName = "HKU\$hiveKey"
         reg load $hiveName $ntuser 2>$null
         if ($LASTEXITCODE -ne 0) { continue }
         foreach ($tweak in $hkcuTweaks) {
-            reg add "$hiveName\$($tweak.Path)" /v $tweak.Name /t REG_DWORD /d $tweak.Value /f 2>$null | Out-Null
+            $tweakType = if ($tweak.ContainsKey('Type') -and $tweak.Type) { [string]$tweak.Type } else { 'DWord' }
+            $regPath = "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)"
+            if (!(Test-Path $regPath)) { New-Item -Path $regPath -Force -EA 0 | Out-Null }
+            Set-ItemProperty -Path $regPath -Name $tweak.Name -Value $tweak.Value -Type $tweakType -Force -EA 0
         }
         [gc]::Collect()
         Start-Sleep -Milliseconds 200

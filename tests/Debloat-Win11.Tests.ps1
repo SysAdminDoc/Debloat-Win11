@@ -360,6 +360,34 @@ Describe 'DryRun Functional Behavior' {
     }
 }
 
+Describe 'AppX Removal Counters' {
+    BeforeAll {
+        $appxHelper = [regex]::Match($scriptContent, 'function Add-AppxManifestEntry[\s\S]*?(?=\nfunction Remove-AppxDryRun)').Value
+        Invoke-Expression $appxHelper
+    }
+
+    BeforeEach {
+        $script:manifest = @{
+            changes = @{
+                appx_removed = [System.Collections.ArrayList]@()
+            }
+        }
+        $script:counters = @{ AppxRemoved = 0 }
+    }
+
+    It 'counts a provisioned-only package in the shared manifest counter' {
+        Add-AppxManifestEntry -PackageName 'Provisioned.Only' | Should -Be $true
+        $script:counters.AppxRemoved | Should -Be 1
+        $script:manifest.changes.appx_removed | Should -Contain 'Provisioned.Only'
+    }
+
+    It 'does not double-count a package already recorded from a user install' {
+        Add-AppxManifestEntry -PackageName 'Shared.Package' | Out-Null
+        Add-AppxManifestEntry -PackageName 'Shared.Package' | Should -Be $false
+        $script:counters.AppxRemoved | Should -Be 1
+    }
+}
+
 Describe 'Undo Mode Logic' {
     It 'undo block handles both old string and new object service entries' {
         $scriptContent | Should -Match 'if \(\$svcEntry -is \[string\]\)'
@@ -624,6 +652,55 @@ Describe 'Shared HKCU Tweaks' {
 
     It 'AllUsers block loads shared tweaks' {
         $allContent | Should -Match 'HkcuTweaks\.psd1'
+    }
+}
+
+Describe 'Logged-in HKCU Propagation' {
+    BeforeAll {
+        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
+        $remediateContent = Get-Content (Join-Path $PSScriptRoot '..' 'Remediate-Drift.ps1') -Raw
+    }
+
+    It 'resolves loaded profile hives through Win32_UserProfile and HKEY_USERS' {
+        foreach ($content in @($maintainContent, $remediateContent)) {
+            $content | Should -Match 'Get-CimInstance -ClassName Win32_UserProfile'
+            $content | Should -Match 'Registry::HKEY_USERS'
+            $content | Should -Match '\$loadedHivePath'
+        }
+    }
+
+    It 'handles loaded profiles before attempting temporary hive loads' {
+        foreach ($content in @($maintainContent, $remediateContent)) {
+            $loadedIndex = $content.IndexOf('$loadedHivePath')
+            $loadIndex = $content.IndexOf('reg load')
+            $loadedIndex | Should -BeGreaterOrEqual 0
+            $loadIndex | Should -BeGreaterThan $loadedIndex
+            $content | Should -Match '\$loadedHivePath\)\s*\{[\s\S]*?continue'
+        }
+    }
+}
+
+Describe 'Typed HKCU Propagation' {
+    BeforeAll {
+        $hkcuContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'HkcuTweaks.psd1') -Raw
+        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
+        $remediateContent = Get-Content (Join-Path $PSScriptRoot '..' 'Remediate-Drift.ps1') -Raw
+        $systemTweaksContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'SystemTweaks_System.ps1') -Raw
+        $allUsersBlock = [regex]::Match($systemTweaksContent, '# ALL-USERS HKCU PROPAGATION[\s\S]*').Value
+    }
+
+    It 'supports optional shared tweak Type metadata with a DWord fallback' {
+        $hkcuContent | Should -Match 'Type is optional'
+        $maintainContent | Should -Match 'ContainsKey\(''Type''\)'
+        $remediateContent | Should -Match 'ContainsKey\(''Type''\)'
+        $allUsersBlock | Should -Match 'ContainsKey\(''Type''\)'
+    }
+
+    It 'applies the resolved type through the registry provider' {
+        foreach ($content in @($maintainContent, $remediateContent, $allUsersBlock)) {
+            $content | Should -Match '-Type \$tweakType'
+            $content | Should -Not -Match 'reg add[\s\S]*REG_DWORD'
+        }
     }
 }
 

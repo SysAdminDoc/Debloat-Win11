@@ -757,6 +757,17 @@ function Set-Reg {
 $script:allAppxPackages = $null
 $script:allProvisionedPackages = $null
 
+function Add-AppxManifestEntry {
+    param([string]$PackageName)
+
+    if ([string]::IsNullOrWhiteSpace($PackageName)) { return $false }
+    if ($script:manifest.changes.appx_removed -contains $PackageName) { return $false }
+
+    $script:manifest.changes.appx_removed.Add($PackageName) | Out-Null
+    $script:counters.AppxRemoved++
+    return $true
+}
+
 function Remove-AppxDryRun {
     param([string]$Pattern)
 
@@ -770,17 +781,14 @@ function Remove-AppxDryRun {
     $provPkgs = $script:allProvisionedPackages | Where-Object { $_.DisplayName -like $Pattern -or $_.PackageName -like $Pattern }
 
     foreach ($pkg in $pkgs) {
-        $script:manifest.changes.appx_removed.Add($pkg.Name) | Out-Null
-        $script:counters.AppxRemoved++
+        Add-AppxManifestEntry -PackageName $pkg.Name | Out-Null
         if (-not $DryRun) {
             $pkg | Remove-AppxPackage -AllUsers 2>$null
         }
     }
     foreach ($pkg in $provPkgs) {
-        $displayName = $pkg.DisplayName
-        if ($displayName -and ($script:manifest.changes.appx_removed -notcontains $displayName)) {
-            $script:manifest.changes.appx_removed.Add($displayName) | Out-Null
-        }
+        $packageName = if (-not [string]::IsNullOrWhiteSpace([string]$pkg.DisplayName)) { [string]$pkg.DisplayName } else { [string]$pkg.PackageName }
+        Add-AppxManifestEntry -PackageName $packageName | Out-Null
         if (-not $DryRun) {
             $pkg | Remove-AppxProvisionedPackage -Online 2>$null
         }
