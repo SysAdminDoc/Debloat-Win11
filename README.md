@@ -68,6 +68,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
 - The policy catalog also carries per-phase risk, scope, prerequisites, rollback, and supported build/edition/architecture metadata; selected unsupported actions fail before mutation.
+- WinGet updates are opt-in and limited to exact `PackageUpdates` entries in the configuration; restore accepts an exact package ID with optional `-RestoreSource` and `-RestoreVersion`, then writes a JSON before/after report.
 - WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
 - The Windows integration harness is skipped unless `DEBLOAT_WIN11_INTEGRATION_VM=1` and `-AllowMutation` are supplied on a disposable elevated VM; failed runs preserve artifacts.
 
@@ -290,8 +291,8 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 # Explain mode - show rationale for each phase without making changes
 .\Debloat-Win11.ps1 -Explain
 
-# Restore a removed app via winget
-.\Debloat-Win11.ps1 -RestoreApp "Microsoft.WindowsCamera"
+# Restore a removed app via winget using an exact package ID
+.\Debloat-Win11.ps1 -RestoreApp "Microsoft.WindowsCamera" -RestoreSource "msstore"
 
 # Compare two undo manifests
 .\Debloat-Win11.ps1 -DiffManifests "manifest1.json","manifest2.json"
@@ -313,6 +314,18 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 ```
 
 `-AllowIrreversibleChanges` is intentionally not implied by normal execution. Without it, the script still records skipped operations in the JSON manifest and continues with reversible, verified changes. AppX packages, OEM/Office/OneDrive content, firewall rule replacement, Edge bookmark files, temp/cache cleanup, startup deletion, optional-feature removal, and context-menu deletion are not changed. Use `-DryRun` first and retain the generated manifest and log before approving a live run.
+
+To opt into deterministic WinGet upgrades, add exact package IDs to the typed configuration:
+
+```powershell
+@{
+    PackageUpdates = @(
+        @{ Id = 'Git.Git'; Source = 'winget'; Version = '2.46.0' }
+    )
+}
+```
+
+Each update records the requested source/version, installed version before and after, return code, and a skip or failure reason.
 
 ### Option 2: One-Liner
 ```powershell

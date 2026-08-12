@@ -20,6 +20,8 @@ param(
     [switch]$Silent,
     [switch]$Explain,
     [string]$RestoreApp,
+    [string]$RestoreSource,
+    [string]$RestoreVersion,
     [string[]]$DiffManifests,
     [string]$WimPath,
     [int]$WimIndex = 1,
@@ -299,27 +301,64 @@ if ($RestoreApp) {
         Write-Host "ERROR: winget is not installed. Use the Microsoft Store to reinstall apps manually." -ForegroundColor Red
         exit 2
     }
+    if ($RestoreApp -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$') {
+        Write-Host "ERROR: -RestoreApp requires an exact WinGet package Id (letters, digits, dot, underscore, or hyphen)" -ForegroundColor Red
+        exit 2
+    }
+    if ($RestoreSource -and $RestoreSource -match '[\r\n]') { Write-Host 'ERROR: -RestoreSource cannot contain newlines' -ForegroundColor Red; exit 2 }
+    if ($RestoreVersion -and $RestoreVersion -match '[\r\n]') { Write-Host 'ERROR: -RestoreVersion cannot contain newlines' -ForegroundColor Red; exit 2 }
 
+    New-Item -Path $LogDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    $restoreReportPath = Join-Path $LogDir ("Debloat-Restore-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $restoreReport = [ordered]@{
+        schema_version = 1
+        mode = 'RestoreApp'
+        package_id = $RestoreApp
+        source = if ($RestoreSource) { $RestoreSource } else { 'default' }
+        requested_version = if ($RestoreVersion) { $RestoreVersion } else { 'latest' }
+        exact_id = $true
+        pre_version = 'Unknown'
+        post_version = 'Unknown'
+        return_code = $null
+        status = 'Failed'
+        output = @{}
+    }
     Write-Host "=== RESTORE APP MODE ===" -ForegroundColor Yellow
-    Write-Host "Searching for: $RestoreApp" -ForegroundColor Cyan
-
-    $searchResult = & winget search $RestoreApp --accept-source-agreements 2>&1
-    Write-Host $($searchResult | Out-String)
-
-    Write-Host ""
-    Write-Host "Installing: $RestoreApp" -ForegroundColor Cyan
-    & winget install $RestoreApp --accept-source-agreements --accept-package-agreements 2>&1 | ForEach-Object { Write-Host $_ }
-
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host ""
-        Write-Host "=== RESTORE COMPLETE ===" -ForegroundColor Green
-        exit 0
-    } else {
-        Write-Host ""
-        Write-Host "=== RESTORE FAILED (exit code $LASTEXITCODE) ===" -ForegroundColor Red
-        Write-Host "Try the Microsoft Store or run: winget install --id <exact-id>" -ForegroundColor Yellow
+    Write-Host "Exact package Id: $RestoreApp" -ForegroundColor Cyan
+    $showArgs = @('show', '--id', $RestoreApp, '--exact', '--accept-source-agreements', '--disable-interactivity')
+    if ($RestoreSource) { $showArgs += @('--source', $RestoreSource) }
+    $showOutput = @(& winget @showArgs 2>&1)
+    $showExitCode = $LASTEXITCODE
+    $restoreReport.output.show = @($showOutput)
+    if ($showExitCode -ne 0) {
+        $restoreReport.return_code = $showExitCode
+        $restoreReport.status = 'UnknownPackage'
+        Write-WingetReport -Path $restoreReportPath -Report $restoreReport
+        Write-Host "ERROR: Exact WinGet package Id was not found (exit code $showExitCode). Report: $restoreReportPath" -ForegroundColor Red
         exit 1
     }
+    $beforeRestore = Get-WingetPackageSnapshot -PackageId $RestoreApp -Source $RestoreSource
+    $restoreReport.pre_version = $beforeRestore.Version
+    $installArgs = @('install', '--id', $RestoreApp, '--exact', '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')
+    if ($RestoreSource) { $installArgs += @('--source', $RestoreSource) }
+    if ($RestoreVersion) { $installArgs += @('--version', $RestoreVersion) }
+    Write-Host "Installing exact package Id: $RestoreApp" -ForegroundColor Cyan
+    $installOutput = @(& winget @installArgs 2>&1)
+    $installExitCode = $LASTEXITCODE
+    $restoreReport.output.install = @($installOutput)
+    $afterRestore = Get-WingetPackageSnapshot -PackageId $RestoreApp -Source $RestoreSource
+    $restoreReport.post_version = $afterRestore.Version
+    $restoreReport.return_code = $installExitCode
+    $restoreReport.status = if ($installExitCode -eq 0 -and $afterRestore.Found) { 'Complete' } else { 'Failed' }
+    Write-WingetReport -Path $restoreReportPath -Report $restoreReport
+    if ($restoreReport.status -eq 'Complete') {
+        Write-Host "=== RESTORE COMPLETE ===" -ForegroundColor Green
+        Write-Host "  Version: $($restoreReport.pre_version) -> $($restoreReport.post_version) | Report: $restoreReportPath" -ForegroundColor White
+        exit 0
+    }
+    Write-Host "=== RESTORE FAILED (exit code $installExitCode) ===" -ForegroundColor Red
+    Write-Host "  Report: $restoreReportPath" -ForegroundColor Yellow
+    exit 1
 }
 
 # ============================================================================
@@ -568,6 +607,22 @@ if ($ConfigPath) {
                     }
                 }
             }
+            'PackageArray' {
+                if ($value -is [string] -or $value -isnot [System.Collections.IEnumerable]) {
+                    $configErrors.Add("$key must be an array of package specification objects") | Out-Null
+                } else {
+                    foreach ($package in @($value)) {
+                        $packageId = [string]$package.Id
+                        $validId = $package -is [hashtable] -and $packageId -match '^[A-Za-z0-9][A-Za-z0-9._-]+$'
+                        if (-not $validId) {
+                            $configErrors.Add("$key contains an invalid exact package Id '$packageId'") | Out-Null
+                            continue
+                        }
+                        if ($package.ContainsKey('Source') -and $package.Source -isnot [string]) { $configErrors.Add("$key package $packageId has a non-string Source") | Out-Null }
+                        if ($package.ContainsKey('Version') -and $package.Version -isnot [string]) { $configErrors.Add("$key package $packageId has a non-string Version") | Out-Null }
+                    }
+                }
+            }
         }
     }
     if ($configErrors.Count -gt 0) {
@@ -657,6 +712,38 @@ function Set-WimRegistryValue {
         throw "Offline registry verification failed for $HiveRoot\$RelativePath\$Name"
     }
     $script:wimReport.registry_values_applied++
+}
+
+function Get-WingetPackageSnapshot {
+    param([Parameter(Mandatory)][string]$PackageId, [string]$Source)
+
+    $args = @('list', '--id', $PackageId, '--exact', '--disable-interactivity')
+    if ($Source) { $args += @('--source', $Source) }
+    $output = @(& winget @args 2>&1)
+    $exitCode = $LASTEXITCODE
+    $version = 'NotInstalled'
+    $escapedId = [regex]::Escape($PackageId)
+    foreach ($line in $output) {
+        if ([string]$line -match "\s$escapedId\s+(?<version>[^\s]+)") {
+            $version = [string]$Matches.version
+            break
+        }
+    }
+    return [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = @($output)
+        Version = $version
+        Found = ($version -ne 'NotInstalled')
+    }
+}
+
+function Write-WingetReport {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][object]$Report)
+    try {
+        $Report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
+    } catch {
+        Write-Host "WARNING: Could not write WinGet report: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 # ============================================================================
@@ -1094,6 +1181,7 @@ $script:manifest = @{
         registry_deleted   = [System.Collections.ArrayList]@()
         folders_deleted    = [System.Collections.ArrayList]@()
         firewall_rules     = [System.Collections.ArrayList]@()
+        package_operations = [System.Collections.ArrayList]@()
         operations         = [System.Collections.ArrayList]@()
     }
 }
@@ -1990,21 +2078,61 @@ if (Test-PhaseEnabled 'Privacy') {
 Update-Phase "App Updates"
 $wingetPath = Get-Command 'winget' -EA 0
 if ($wingetPath -and (Test-PhaseEnabled 'Updates')) {
-    Write-Log "[Updates] Updating surviving apps via winget..." "SECTION"
-    if ($DryRun) {
-        Invoke-TrackedOperation -Name 'WinGet upgrade --all' -Action 'Upgrade installed packages' -Scope 'Machine' -Operation { } | Out-Null
-        Write-Log "  [DRY RUN] Would run: winget upgrade --all --silent --include-unknown" "INFO"
-    } else {
-        $wingetUpdated = Invoke-TrackedOperation -Name 'WinGet upgrade --all' -Action 'Upgrade installed packages' -Scope 'Machine' -Operation {
-            $script:lastWingetResult = @(& winget upgrade --all --silent --include-unknown --accept-source-agreements --accept-package-agreements 2>&1)
-            if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+    Write-Log "[Updates] Updating only catalog-selected packages via winget..." "SECTION"
+    $packageUpdates = if ($script:configOverrides.ContainsKey('PackageUpdates')) { @($script:configOverrides.PackageUpdates) } else { @() }
+    if ($packageUpdates.Count -eq 0) {
+        Register-OperationResult -Name 'WinGet package updates' -Action 'Upgrade configured exact package IDs' -Scope 'Machine' -Status 'Skipped' -ErrorMessage 'No PackageUpdates entries were selected'
+        Write-Log "  App updates skipped: add exact PackageUpdates entries to ConfigPath" "WARNING"
+    }
+    foreach ($packageSpec in $packageUpdates) {
+        $packageId = [string]$packageSpec.Id
+        $packageSource = if ($packageSpec.ContainsKey('Source')) { [string]$packageSpec.Source } else { $null }
+        $targetVersion = if ($packageSpec.ContainsKey('Version')) { [string]$packageSpec.Version } else { $null }
+        $beforePackage = Get-WingetPackageSnapshot -PackageId $packageId -Source $packageSource
+        $packageRecord = [ordered]@{
+            id = $packageId
+            source = if ($packageSource) { $packageSource } else { 'default' }
+            requested_version = if ($targetVersion) { $targetVersion } else { 'latest' }
+            exact_id = $true
+            before_version = $beforePackage.Version
+            after_version = 'Unknown'
+            return_code = $null
+            status = 'Planned'
+            reason = $null
         }
-        if ($wingetUpdated) {
-            $upgraded = @($script:lastWingetResult | Select-String 'Successfully installed').Count
-            Write-Log "  winget: $upgraded packages updated" "SUCCESS"
-        } else {
-            Write-Log "  winget upgrade failed; see operation results" "ERROR"
+        if (-not $beforePackage.Found) {
+            $packageRecord.status = 'Skipped'
+            $packageRecord.reason = 'Exact package ID is not installed or was not returned by winget list'
+            $script:manifest.changes.package_operations.Add($packageRecord) | Out-Null
+            Register-OperationResult -Name "WinGet:$packageId" -Action 'Upgrade exact package ID' -Scope 'Machine' -Status 'Skipped' -ErrorMessage $packageRecord.reason
+            Write-Log "  Skipped ${packageId}: not installed or not discoverable" "WARNING"
+            continue
         }
+        $upgradeArgs = @('upgrade', '--id', $packageId, '--exact', '--silent', '--disable-interactivity', '--accept-source-agreements', '--accept-package-agreements')
+        if ($packageSource) { $upgradeArgs += @('--source', $packageSource) }
+        if ($targetVersion) { $upgradeArgs += @('--version', $targetVersion) }
+        if ($DryRun) {
+            $packageRecord.status = 'Planned'
+            $script:manifest.changes.package_operations.Add($packageRecord) | Out-Null
+            Register-OperationResult -Name "WinGet:$packageId" -Action 'Upgrade exact package ID' -Scope 'Machine' -Status 'Planned'
+            Write-Log "  [DRY RUN] Would run: winget $($upgradeArgs -join ' ')" "INFO"
+            continue
+        }
+        $script:lastWingetExitCode = $null
+        $script:lastWingetAfter = $null
+        $wingetUpdated = Invoke-TrackedOperation -Name "WinGet:$packageId" -Action 'Upgrade exact package ID' -Scope 'Machine' -Operation {
+            $script:lastWingetResult = @(& winget @upgradeArgs 2>&1)
+            $script:lastWingetExitCode = $LASTEXITCODE
+            if ($script:lastWingetExitCode -ne 0) { throw "winget exited with code $script:lastWingetExitCode" }
+        } -Verification {
+            $script:lastWingetAfter = Get-WingetPackageSnapshot -PackageId $packageId -Source $packageSource
+            $script:lastWingetAfter.Found
+        }
+        $packageRecord.return_code = if ($script:lastWingetExitCode -ne $null) { $script:lastWingetExitCode } else { 1 }
+        $packageRecord.after_version = if ($script:lastWingetAfter) { $script:lastWingetAfter.Version } else { 'Unknown' }
+        $packageRecord.status = if ($wingetUpdated) { 'Succeeded' } else { 'Failed' }
+        if (-not $wingetUpdated) { $packageRecord.reason = 'WinGet upgrade failed; see operation error' }
+        $script:manifest.changes.package_operations.Add($packageRecord) | Out-Null
     }
 } else {
     if (-not $wingetPath) {

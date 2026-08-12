@@ -1007,6 +1007,7 @@ Describe 'Policy Catalog Contract' {
         @($catalog.ConfigSchema.Keys) | Should -Contain 'RemovePatterns'
         $catalog.ConfigSchema.DarkMode.Type | Should -Be 'Boolean'
         $catalog.ConfigSchema.NetworkProfile.Values | Should -Contain 'Preserve'
+        $catalog.ConfigSchema.PackageUpdates.Type | Should -Be 'PackageArray'
     }
 
     It 'defines complete action risk and support metadata for every phase' {
@@ -1034,6 +1035,27 @@ Describe 'Action Plan and Support Matrix' {
         $scriptContent | Should -Match 'supportErrors'
         $scriptContent | Should -Match 'build.*edition.*architecture'
         $scriptContent | Should -Match 'Write-ActionPlan'
+    }
+}
+
+Describe 'Deterministic WinGet Operations' {
+    It 'does not use unbounded upgrade-all or ambiguous restore search' {
+        $scriptContent | Should -Not -Match 'winget upgrade --all'
+        $scriptContent | Should -Not -Match '--include-unknown'
+        $scriptContent | Should -Match "'upgrade', '--id',"
+        $scriptContent | Should -Match "'install', '--id',"
+        $scriptContent | Should -Match 'Get-WingetPackageSnapshot'
+    }
+
+    It 'records package source, requested version, old/new versions, return code, and skip/failure states' {
+        $scriptContent | Should -Match 'package_operations'
+        $scriptContent | Should -Match 'before_version'
+        $scriptContent | Should -Match 'after_version'
+        $scriptContent | Should -Match 'return_code'
+        $scriptContent | Should -Match 'UnknownPackage'
+        $scriptContent | Should -Match 'Exact package ID is not installed'
+        $scriptContent | Should -Match 'RestoreSource'
+        $scriptContent | Should -Match 'RestoreVersion'
     }
 }
 

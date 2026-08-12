@@ -9,7 +9,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - Registry, service, task, AppX, firewall, and selected orchestrator operations record planned/succeeded/failed/skipped results; incomplete runs are not detected as compliant.
 - Module cleanup paths now use the same tracked-operation contract, verify service/feature/firewall/time changes, and include operation status/error rows in console, JSON, and HTML output.
 - Destructive package, OEM, Office, OneDrive, firewall, file, startup, feature, and bookmark cleanup requires explicit `-AllowIrreversibleChanges` approval.
-- Test mocks use Pester's `Should -Invoke` syntax; the 142-test suite passes under Pester 5.9 and 6.0.1 on PowerShell 7 and under Windows PowerShell 5.1 with Pester 5.9.
+- Test mocks use Pester's `Should -Invoke` syntax; the 144-test suite passes under Pester 5.9 and 6.0.1 on PowerShell 7 and under Windows PowerShell 5.1 with Pester 5.9.
 - Added `tools/Invoke-TestSuite.ps1` to validate an installed Pester version before running the suite; the declared matrix is Pester 5.9.0 on Windows PowerShell 5.1/PowerShell 7 and Pester 6.0.1 on PowerShell 7.
 - Added versioned, data-only `Modules/PolicyCatalog.psd1` for Windows AI policies, shared HKCU tweaks, and typed config-schema validation; removed executable policy-data loading.
 - Drift detection and remediation now enumerate Win32_UserProfile/ProfileList records, operate directly on loaded hives, temporarily load offline hives with checked cleanup, and report per-setting/profile outcomes.
@@ -17,6 +17,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - WIM servicing validates DISM/image/mount state, applies the shared catalog to offline hives, verifies package/registry operations, discards failed transactions, verifies final unmount state, and emits a JSON commit report.
 - Added a disposable-VM integration harness that explicitly skips without a VM marker and mutation opt-in, then captures DryRun, apply, detection, generated revert, and registry-state comparison artifacts.
 - Every phase now has catalog-backed risk, scope, prerequisite, rollback, and supported platform metadata recorded in the action plan and manifest; unsupported selected actions fail before mutation.
+- WinGet restore and update flows now require exact package IDs, are opt-in and configuration-scoped, support explicit source/version requests, verify before/after versions, and record return codes and skip/failure reasons.
 - Network defaults preserve connection profiles, restrict sharing rules to Domain/Private, and exclude LLMNR; OEM cleanup no longer targets Intel drivers, language packs, or Windows Security startup.
 
 ## [v2.3.10] - 2026-08-11

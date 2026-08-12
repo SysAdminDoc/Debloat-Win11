@@ -107,5 +107,6 @@
         DisableNagle = @{ Type = 'Boolean' }
         EnableNetworkDiscovery = @{ Type = 'Boolean' }
         EnableFilePrinterSharing = @{ Type = 'Boolean' }
+        PackageUpdates = @{ Type = 'PackageArray' }
     }
 }
