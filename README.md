@@ -65,7 +65,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Destructive package, OEM, Office, OneDrive, firewall, file, and broad cleanup operations require `-AllowIrreversibleChanges`; `-DryRun` remains the preview path.
 - Manifests record planned, succeeded, failed, and skipped operation results and are marked incomplete when a mutation fails.
 - Network defaults preserve the current profile and do not enable discovery, file sharing, or LLMNR on Public networks.
-- Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
+- Intune detection accepts only a schema-valid manifest with matching policy/config hashes, target scope, supported runtime, zero failed operations, and a matching complete registry stamp; `-OutputFormat Json` emits stable compliance reasons.
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
 - The policy catalog also carries per-phase risk, scope, prerequisites, rollback, and supported build/edition/architecture metadata; selected unsupported actions fail before mutation.
 - WinGet updates are opt-in and limited to exact `PackageUpdates` entries in the configuration; restore accepts an exact package ID with optional `-RestoreSource` and `-RestoreVersion`, then writes a JSON before/after report.
@@ -1094,7 +1094,7 @@ switch ($result.ExitCode) {
 
 1. Create Win32 app package (use IntuneWinAppUtil)
 2. Install command: `powershell.exe -ExecutionPolicy Bypass -File "Debloat-Win11.ps1"`
-3. Detection rule: File exists `%ProgramData%\Debloat-Win11\Logs\Debloat-*.log`
+3. Detection rule: use `Detect-Debloat.ps1` as a custom detection script; pass `-ExpectedScope AllUsers` for SYSTEM-wide profile remediation and `-ExpectedConfigPath .\presets\security.psd1` when a preset is part of the deployment.
 4. Requirements: Windows 10 1903+
 5. For policy-based inbox app removal, use either the logged `DynamicRemovalList` OMA-URI payload or local GPO-compatible registry delivery, not both on the same device.
 

@@ -632,6 +632,17 @@ if ($ConfigPath) {
     }
 }
 
+try {
+    $script:policyCatalogHash = (Get-FileHash -LiteralPath $script:policyCatalogFile -Algorithm SHA256 -ErrorAction Stop).Hash
+    $script:configurationHash = 'none'
+    if ($ConfigPath) {
+        $script:configurationHash = (Get-FileHash -LiteralPath (Resolve-Path -LiteralPath $ConfigPath -ErrorAction Stop).Path -Algorithm SHA256 -ErrorAction Stop).Hash
+    }
+} catch {
+    Write-Host "ERROR: Could not fingerprint policy catalog/configuration: $($_.Exception.Message)" -ForegroundColor Red
+    exit 2
+}
+
 function Get-ActionMetadata {
     param([Parameter(Mandatory)][string]$Phase)
     return $script:actionCatalog | Where-Object { $_.Phase -eq $Phase } | Select-Object -First 1
@@ -1154,12 +1165,28 @@ $script:counters = @{
 }
 
 $script:manifest = @{
+    schema_version = 2
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
     version   = 'v2.3.10'
+    correlation_id = [guid]::NewGuid().ToString()
     dryrun    = $DryRun.IsPresent
     catalog   = [ordered]@{
         policy_catalog_version = [string]$script:policyCatalog.CatalogVersion
         policy_catalog_schema = [int]$script:policyCatalog.SchemaVersion
+        policy_catalog_hash = $script:policyCatalogHash
+    }
+    configuration = [ordered]@{
+        supplied = [bool]$ConfigPath
+        config_hash = $script:configurationHash
+    }
+    scope = [ordered]@{
+        user_policy = if ($AllUsers) { 'AllUsers' } else { 'CurrentUser' }
+        machine = 'Machine'
+        all_users = $AllUsers.IsPresent
+    }
+    selection = [ordered]@{
+        only = if ($Only) { @($Only) } else { @() }
+        skip = if ($Skip) { @($Skip) } else { @() }
     }
     action_plan = [System.Collections.ArrayList]@()
     runtime   = [ordered]@{
@@ -2275,13 +2302,13 @@ if ($DryRun) {
     $stampResult = Invoke-TrackedOperation -Name 'Completion registry stamp' -Action 'Record run status and manifest path' -Scope 'Machine' -Operation {
         $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
         if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force -EA Stop | Out-Null }
-        if ($stampStatus -eq 'Complete') {
-            Set-DebloatRegistryProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -EA Stop
-            Set-DebloatRegistryProperty -Path $regStampPath -Name "Status" -Value "Complete" -Type String -EA Stop
-            Set-DebloatRegistryProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -EA Stop
-        } else {
-            Set-DebloatRegistryProperty -Path $regStampPath -Name "Status" -Value "Incomplete" -Type String -EA Stop
-        }
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "Status" -Value $stampStatus -Type String -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "ManifestSchemaVersion" -Value ([int]$script:manifest.schema_version) -Type DWord -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "CatalogHash" -Value $script:policyCatalogHash -Type String -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "ConfigHash" -Value $script:configurationHash -Type String -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "Scope" -Value ([string]$script:manifest.scope.user_policy) -Type String -EA Stop
         Set-DebloatRegistryProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -EA Stop
     } -Verification {
         $stamp = Get-ItemProperty -Path "HKLM:\SOFTWARE\Debloat-Win11" -EA Stop

@@ -289,6 +289,17 @@ Describe 'Manifest Structure' {
         $scriptContent | Should -Match 'registry_deleted'
         $scriptContent | Should -Match 'folders_deleted'
     }
+
+    It 'records schema, catalog/config fingerprints, and target scope' {
+        $scriptContent | Should -Match 'schema_version = 2'
+        $scriptContent | Should -Match 'correlation_id'
+        $scriptContent | Should -Match 'policy_catalog_hash'
+        $scriptContent | Should -Match 'config_hash'
+        $scriptContent | Should -Match 'user_policy'
+        $scriptContent | Should -Match 'ManifestSchemaVersion'
+        $scriptContent | Should -Match 'CatalogHash'
+        $scriptContent | Should -Match 'ConfigHash'
+    }
 }
 
 Describe 'EventLog Integration' {
@@ -438,9 +449,16 @@ Describe 'Irreversible Change Gate' {
 
     It 'makes compliance require a complete manifest and registry stamp' {
         $detectionContent = Get-Content (Join-Path $repoRoot 'Detect-Debloat.ps1') -Raw
-        $detectionContent | Should -Match "Status -eq 'Complete'"
-        $detectionContent | Should -Match 'operation_summary\.failed -eq 0'
+        $detectionContent | Should -Match "Status -ne 'Complete'"
+        $detectionContent | Should -Match 'operation_summary\.failed -ne 0'
         $detectionContent | Should -Match 'ManifestPath'
+        $detectionContent | Should -Match 'schema_version'
+        $detectionContent | Should -Match 'policy_catalog_hash'
+        $detectionContent | Should -Match 'config_hash'
+        $detectionContent | Should -Match 'ExpectedScope'
+        $detectionContent | Should -Match 'ExpectedConfigPath'
+        $detectionContent | Should -Match 'OutputFormat'
+        $detectionContent | Should -Match 'unsupportedSelected'
     }
 
     It 'records rollback limitations instead of silently claiming full recovery' {
