@@ -616,6 +616,36 @@ Describe 'WIM Mode Resilience' {
     }
 }
 
+Describe 'Windows Integration Harness' {
+    BeforeAll {
+        $integrationContent = Get-Content (Join-Path $repoRoot 'tools\Invoke-WindowsIntegrationTests.ps1') -Raw
+    }
+
+    It 'skips explicitly when the disposable VM marker or mutation opt-in is absent' {
+        $integrationContent | Should -Match 'DEBLOAT_WIN11_INTEGRATION_VM'
+        $integrationContent | Should -Match '\-AllowMutation'
+        $integrationContent | Should -Match "status = 'Skipped'"
+        $integrationContent | Should -Match 'Write-IntegrationResult -ExitCode 0'
+    }
+
+    It 'preserves artifacts and runs the full apply/detect/revert sequence when enabled' {
+        foreach ($step in @('DryRun','Apply','DetectAfterApply','Revert','DetectAfterRevert')) {
+            $integrationContent | Should -Match "-Name '$step'"
+        }
+        $integrationContent | Should -Match 'before-state\.json'
+        $integrationContent | Should -Match 'after-revert-state\.json'
+        $integrationContent | Should -Match 'integration-result\.json'
+        $integrationContent | Should -Match 'registry_comparison'
+    }
+
+    It 'fails instead of claiming success when apply, revert, or state comparison fails' {
+        $integrationContent | Should -Match "Apply command failed"
+        $integrationContent | Should -Match "Revert command failed"
+        $integrationContent | Should -Match 'Mismatches'
+        $integrationContent | Should -Match "status = 'Failed'"
+    }
+}
+
 # ============================================================================
 # MOCK-BASED BEHAVIORAL TESTS
 # ============================================================================

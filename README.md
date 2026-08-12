@@ -68,6 +68,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
 - WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
+- The Windows integration harness is skipped unless `DEBLOAT_WIN11_INTEGRATION_VM=1` and `-AllowMutation` are supplied on a disposable elevated VM; failed runs preserve artifacts.
 
 ### New in v2.3.9
 - Lockfile now detects stale PIDs from crashed runs instead of permanently blocking
@@ -1174,6 +1175,9 @@ EdgeBookmarks = @(
 # Optional PowerShell 7 compatibility check with Pester 6.0.1
 pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 6.0.1; Invoke-Pester .\tests\ -Output Normal"
 .\tools\Invoke-StaticAnalysis.ps1
+
+# Disposable-VM integration path (explicitly skipped on ordinary machines)
+.\tools\Invoke-WindowsIntegrationTests.ps1
 ```
 
 Supported test matrix:
