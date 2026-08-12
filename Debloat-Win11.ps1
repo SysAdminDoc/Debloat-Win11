@@ -686,7 +686,7 @@ $script:startTime = Get-Date
 # ============================================================================
 # PROGRESS TRACKING
 # ============================================================================
-$script:totalPhases = 12
+$script:totalPhases = 13
 $script:currentPhase = 0
 function Update-Phase {
     param([string]$PhaseName)
@@ -818,27 +818,51 @@ function Invoke-TrackedOperation {
         [string]$Action,
         [string]$Scope = 'Machine',
         [scriptblock]$Operation,
-        [scriptblock]$Verification
+        [scriptblock]$Verification,
+        [switch]$RunDuringDryRun
     )
 
-    if ($DryRun) {
+    if ($DryRun -and -not $RunDuringDryRun) {
         Register-OperationResult -Name $Name -Action $Action -Scope $Scope -Status 'Planned'
         return $true
     }
 
     try {
         $ErrorActionPreference = 'Stop'
-        & $Operation
+        $operationResult = & $Operation
+        if ($operationResult -is [bool] -and -not $operationResult) { throw 'Operation returned a failure result' }
         if ($Verification) {
             $verified = & $Verification
             if ($verified -is [bool] -and -not $verified) { throw 'Post-operation verification failed' }
         }
-        Register-OperationResult -Name $Name -Action $Action -Scope $Scope -Status 'Succeeded'
+        $status = if ($DryRun) { 'Planned' } else { 'Succeeded' }
+        Register-OperationResult -Name $Name -Action $Action -Scope $Scope -Status $status
         return $true
     } catch {
         Register-OperationFailure -Name $Name -Action $Action -Scope $Scope -ErrorRecord $_
         return $false
     }
+}
+
+function Remove-TrackedPath {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Scope = 'Mixed',
+        [switch]$Recurse,
+        [string]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $operationName = if ($Name) { $Name } else { $Path }
+    $removed = Invoke-TrackedOperation -Name $operationName -Action 'Delete file or folder' -Scope $Scope -Operation {
+        Remove-Item -LiteralPath $Path -Recurse:$Recurse -Force -EA Stop
+    } -Verification {
+        -not (Test-Path -LiteralPath $Path)
+    }
+    if ($removed -and -not ($script:manifest.changes.folders_deleted -contains $Path)) {
+        $script:manifest.changes.folders_deleted.Add($Path) | Out-Null
+    }
+    return $removed
 }
 
 function Test-IrreversibleOperationAllowed {
@@ -1221,15 +1245,19 @@ if ($script:isSSD) {
 # ============================================================================
 Write-Log "[Safety] Creating System Restore Point..." "SECTION"
 if (-not (Test-AnyPhaseSelected)) {
+    Register-OperationResult -Name 'System Restore Point' -Action 'Create restore point' -Scope 'Machine' -Status 'Skipped' -ErrorMessage 'No execution phase selected'
     Write-Log "  Restore point skipped because no execution phase is selected" "INFO"
 } elseif ($DryRun) {
+    Register-OperationResult -Name 'System Restore Point' -Action 'Create restore point' -Scope 'Machine' -Status 'Planned'
     Write-Log "  [DRY RUN] Would create restore point" "INFO"
 } else {
     try {
         Enable-ComputerRestore -Drive "C:\" -EA 0
         Checkpoint-Computer -Description "Pre-Debloat $(Get-Date -Format 'yyyy-MM-dd HH:mm')" -RestorePointType "MODIFY_SETTINGS" -EA Stop
+        Register-OperationResult -Name 'System Restore Point' -Action 'Create restore point' -Scope 'Machine' -Status 'Succeeded'
         Write-Log "  Restore point created" "SUCCESS"
     } catch {
+        Register-OperationResult -Name 'System Restore Point' -Action 'Create restore point' -Scope 'Machine' -Status 'Skipped' -ErrorMessage $_.Exception.Message
         Write-Log "  Could not create restore point (may already exist today)" "WARNING"
     }
 }
@@ -1549,15 +1577,24 @@ if (Test-PhaseEnabled 'Privacy') {
 # ============================================================================
 # OPTIONAL: WINGET APP UPDATES (keeps surviving apps current)
 # ============================================================================
+Update-Phase "App Updates"
 $wingetPath = Get-Command 'winget' -EA 0
 if ($wingetPath -and (Test-PhaseEnabled 'Updates')) {
     Write-Log "[Updates] Updating surviving apps via winget..." "SECTION"
-    if (-not $DryRun) {
-        $wingetResult = & winget upgrade --all --silent --include-unknown --accept-source-agreements --accept-package-agreements 2>&1
-        $upgraded = ($wingetResult | Select-String 'Successfully installed').Count
-        Write-Log "  winget: $upgraded packages updated" "SUCCESS"
-    } else {
+    if ($DryRun) {
+        Invoke-TrackedOperation -Name 'WinGet upgrade --all' -Action 'Upgrade installed packages' -Scope 'Machine' -Operation { } | Out-Null
         Write-Log "  [DRY RUN] Would run: winget upgrade --all --silent --include-unknown" "INFO"
+    } else {
+        $wingetUpdated = Invoke-TrackedOperation -Name 'WinGet upgrade --all' -Action 'Upgrade installed packages' -Scope 'Machine' -Operation {
+            $script:lastWingetResult = @(& winget upgrade --all --silent --include-unknown --accept-source-agreements --accept-package-agreements 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw "winget exited with code $LASTEXITCODE" }
+        }
+        if ($wingetUpdated) {
+            $upgraded = @($script:lastWingetResult | Select-String 'Successfully installed').Count
+            Write-Log "  winget: $upgraded packages updated" "SUCCESS"
+        } else {
+            Write-Log "  winget upgrade failed; see operation results" "ERROR"
+        }
     }
 } else {
     if (-not $wingetPath) {
@@ -1610,18 +1647,18 @@ if (Test-SystemTweaksCoreSelected) {
 Write-Log "[Maintenance] Registering post-update scheduled task..." "SECTION"
 $maintainScript = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Debloat-Win11-Maintain.ps1'
 if (Test-Path $maintainScript) {
-    if (-not $DryRun) {
-        $taskName = 'Debloat-Win11-PostUpdate'
-        $existingTask = Get-ScheduledTask -TaskName $taskName -EA 0
-        if (-not $existingTask) {
+    $taskName = 'Debloat-Win11-PostUpdate'
+    $existingTask = Get-ScheduledTask -TaskName $taskName -EA 0
+    if (-not $existingTask) {
+        $taskRegistered = Invoke-TrackedOperation -Name $taskName -Action 'Register post-update maintenance task' -Scope 'Machine' -Operation {
             $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-ExecutionPolicy Bypass -NonInteractive -File `"$maintainScript`""
             # Trigger on WU completion (Event ID 19 = installation complete) + daily fallback
             $wuTrigger = New-ScheduledTaskTrigger -Daily -At '03:00'
             $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest -LogonType ServiceAccount
             $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $wuTrigger -Principal $principal -Settings $settings -Description 'Re-applies privacy/telemetry tweaks after Windows Update resets them' -EA 0 | Out-Null
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $wuTrigger -Principal $principal -Settings $settings -Description 'Re-applies privacy/telemetry tweaks after Windows Update resets them' -EA Stop | Out-Null
             # Add event-based trigger for WU completion (supplements the daily trigger)
-            $taskXml = (Get-ScheduledTask -TaskName $taskName -EA 0).Xml
+            $taskXml = (Get-ScheduledTask -TaskName $taskName -EA Stop).Xml
             if ($taskXml) {
                 $wuEventTrigger = @"
   <EventTrigger>
@@ -1630,13 +1667,20 @@ if (Test-Path $maintainScript) {
   </EventTrigger>
 "@
                 $taskXml = $taskXml -replace '(</Triggers>)', "$wuEventTrigger`$1"
-                Register-ScheduledTask -TaskName $taskName -Xml $taskXml -Force -EA 0 | Out-Null
+                Register-ScheduledTask -TaskName $taskName -Xml $taskXml -Force -EA Stop | Out-Null
             }
+        } -Verification {
+            $registeredTask = Get-ScheduledTask -TaskName $taskName -EA Stop
+            $null -ne $registeredTask
+        }
+        if ($taskRegistered -and -not $DryRun) {
             Write-Log "  Scheduled task '$taskName' registered (WU-completion + daily 3AM)" "SUCCESS"
-        } else {
-            Write-Log "  Scheduled task '$taskName' already exists" "INFO"
         }
     } else {
+        Register-OperationResult -Name $taskName -Action 'Register post-update maintenance task' -Scope 'Machine' -Status 'Skipped' -ErrorMessage 'Task already exists'
+        Write-Log "  Scheduled task '$taskName' already exists" "INFO"
+    }
+    if ($DryRun -and -not $existingTask) {
         Write-Log "  [DRY RUN] Would register post-update maintenance task" "INFO"
     }
 } else {
@@ -1651,12 +1695,18 @@ if (Test-Path $maintainScript) {
 # ============================================================================
 if ($script:systemTweaksCoreSelected -or (Test-SystemTweakEnabled 'StartMenu')) {
     Write-Log "[Finalizing] Restarting Explorer..." "SECTION"
-    if (-not $DryRun) {
-        Stop-Process -Name explorer -Force -EA 0
+    $explorerRestarted = Invoke-TrackedOperation -Name 'Explorer' -Action 'Restart Explorer shell' -Scope 'CurrentUser' -Operation {
+        Get-Process -Name explorer -EA 0 | Stop-Process -Force -EA Stop
         Start-Sleep -Seconds 2
-        Start-Process explorer.exe
+        Start-Process explorer.exe -EA Stop
+    } -Verification {
+        $null -ne (Get-Process -Name explorer -EA Stop)
     }
-    Write-Log "  Explorer restart processed" "SUCCESS"
+    if ($explorerRestarted -and -not $DryRun) {
+        Write-Log "  Explorer restart processed" "SUCCESS"
+    } elseif ($DryRun) {
+        Write-Log "  [DRY RUN] Would restart Explorer" "INFO"
+    }
 } else {
     Write-Log "[Finalizing] Explorer restart SKIPPED (UI phases not selected)" "INFO"
 }
@@ -1677,6 +1727,30 @@ $script:manifest.rollback = [ordered]@{
     status = if ($unsupportedRollback.Count -gt 0) { 'Partial' } else { 'Complete' }
 }
 $script:manifest.status = if ($DryRun) { 'Planned' } elseif ($script:exitCode -eq 0) { 'Complete' } else { 'Incomplete' }
+
+# Stamp completion only after all selected operations have reported. The stamp
+# itself is tracked so a failed compliance marker cannot look like a success.
+$stampStatus = if ($DryRun) { 'Planned' } elseif ($script:exitCode -eq 0) { 'Complete' } else { 'Incomplete' }
+if ($DryRun) {
+    Invoke-TrackedOperation -Name 'Completion registry stamp' -Action 'Record run status and manifest path' -Scope 'Machine' -Operation { } | Out-Null
+} else {
+    $stampResult = Invoke-TrackedOperation -Name 'Completion registry stamp' -Action 'Record run status and manifest path' -Scope 'Machine' -Operation {
+        $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
+        if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force -EA Stop | Out-Null }
+        if ($stampStatus -eq 'Complete') {
+            Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -Force -EA Stop
+            Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Complete" -Type String -Force -EA Stop
+            Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA Stop
+        } else {
+            Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Incomplete" -Type String -Force -EA Stop
+        }
+        Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA Stop
+    } -Verification {
+        $stamp = Get-ItemProperty -Path "HKLM:\SOFTWARE\Debloat-Win11" -EA Stop
+        $stamp.Status -eq $stampStatus
+    }
+    if (-not $stampResult) { $script:manifest.status = 'Incomplete' }
+}
 $script:manifest.operation_summary = [ordered]@{
     attempted = $script:counters.OperationsAttempted
     succeeded = $script:counters.OperationsSucceeded
@@ -1689,22 +1763,6 @@ try {
     Write-Log "Undo manifest: $manifestFile" "INFO"
 } catch {
     Write-Log "Could not write undo manifest" "WARNING"
-}
-
-# Write registry version stamp for Intune native detection
-if (-not $DryRun -and $script:exitCode -eq 0) {
-    $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
-    if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
-    Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -Force -EA 0
-    Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Complete" -Type String -Force -EA 0
-    Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
-    Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
-} elseif (-not $DryRun) {
-    $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
-    if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
-    Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Incomplete" -Type String -Force -EA 0
-    Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
-    Write-Log "Skipping completion stamp because the run is incomplete" "WARNING"
 }
 
 # ============================================================================
@@ -1799,6 +1857,14 @@ try {
         $taskName = ConvertTo-HtmlCell $_
         "<tr><td>$taskName</td><td>Disabled</td></tr>"
     }) -join "`n"
+    $operationRows = ($script:manifest.changes.operations | ForEach-Object {
+        $operationName = ConvertTo-HtmlCell $_.name
+        $operationAction = ConvertTo-HtmlCell $_.action
+        $operationScope = ConvertTo-HtmlCell $_.scope
+        $operationStatus = ConvertTo-HtmlCell $_.status
+        $operationError = ConvertTo-HtmlCell $_.error
+        "<tr><td>$operationName</td><td>$operationAction</td><td>$operationScope</td><td>$operationStatus</td><td>$operationError</td></tr>"
+    }) -join "`n"
 
     $htmlContent = @"
 <!DOCTYPE html>
@@ -1813,7 +1879,13 @@ th{background:#313244;color:#89b4fa}tr:nth-child(even){background:#181825}
 </style></head><body>
 <h1>Debloat-Win11 Report$dryLabel</h1>
 <p>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Host: $env:COMPUTERNAME | OS: $osName (Build $osBuild)</p>
+<div class="stat"><b>Run Status:</b> $(ConvertTo-HtmlCell $script:manifest.status) | <b>Operations Attempted:</b> $($script:counters.OperationsAttempted) | <b>Succeeded:</b> $($script:counters.OperationsSucceeded) | <b>Failed:</b> $($script:counters.OperationsFailed) | <b>Skipped:</b> $($script:counters.OperationsSkipped)</div>
 <div class="stat"><b>AppX Removed:</b> $($script:counters.AppxRemoved) | <b>Services Disabled:</b> $($script:counters.ServicesDisabled) | <b>Tasks Disabled:</b> $($script:counters.TasksDisabled) | <b>Registry Tweaks:</b> $($script:counters.RegistryTweaks)</div>
+
+<h2>Operation Results ($($script:manifest.changes.operations.Count))</h2>
+<table><tr><th>Operation</th><th>Action</th><th>Scope</th><th>Status</th><th>Error</th></tr>
+$operationRows
+</table>
 
 <h2>Registry Changes ($($script:manifest.changes.registry_set.Count))</h2>
 <table><tr><th>Path</th><th>Name</th><th>Old Value</th><th>New Value</th></tr>
@@ -1874,6 +1946,11 @@ Write-Host ("  OEM Apps Cleaned:          {0}" -f $script:counters.OEMCleaned) -
 Write-Host ("  Services Disabled:         {0}" -f $script:counters.ServicesDisabled) -ForegroundColor White
 Write-Host ("  Tasks Disabled:            {0}" -f $script:counters.TasksDisabled) -ForegroundColor White
 Write-Host ("  Registry Tweaks Applied:   {0}" -f $script:counters.RegistryTweaks) -ForegroundColor White
+Write-Host ("  Operations Attempted:       {0}" -f $script:counters.OperationsAttempted) -ForegroundColor White
+Write-Host ("  Operations Succeeded:       {0}" -f $script:counters.OperationsSucceeded) -ForegroundColor White
+Write-Host ("  Operations Failed:          {0}" -f $script:counters.OperationsFailed) -ForegroundColor $(if ($script:counters.OperationsFailed -gt 0) { 'Red' } else { 'White' })
+Write-Host ("  Operations Skipped:         {0}" -f $script:counters.OperationsSkipped) -ForegroundColor White
+Write-Host ("  Run Status:                 {0}" -f $script:manifest.status) -ForegroundColor $(if ($script:manifest.status -eq 'Complete' -or $script:manifest.status -eq 'Planned') { 'Green' } else { 'Red' })
 Write-Host ("  Disk Space Recovered:      {0}" -f $diskRecovered) -ForegroundColor White
 Write-Host ("  Runtime:                   {0}" -f $runtimeStr) -ForegroundColor White
 Write-Host ("  Log File:                  {0}" -f $logFile) -ForegroundColor White
@@ -1883,10 +1960,11 @@ Write-Host "============================================" -ForegroundColor Cyan
 # Log the summary too
 Write-Log "=== DEBLOAT COMPLETE ===" "INFO"
 Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.ServicesDisabled) | Tasks: $($script:counters.TasksDisabled) | Registry: $($script:counters.RegistryTweaks)" "INFO"
+Write-Log "Operations: attempted=$($script:counters.OperationsAttempted) succeeded=$($script:counters.OperationsSucceeded) failed=$($script:counters.OperationsFailed) skipped=$($script:counters.OperationsSkipped) status=$($script:manifest.status)" "INFO"
 Write-Log "Exit code: $script:exitCode" "INFO"
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.3.10 completed. AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.3.10 status=$($script:manifest.status). AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) OperationsFailed=$($script:counters.OperationsFailed) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 

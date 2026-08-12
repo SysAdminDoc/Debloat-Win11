@@ -31,12 +31,16 @@ foreach ($policy in ($script:windowsAiPolicies | Where-Object { $_.ApplyByDefaul
     Set-Reg -Path ('{0}:\{1}' -f $root, $policy.Path) -Name $policy.Name -Value $policy.Value -Type $policy.Type
 }
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "EnableRecall" -Value 0
-if (-not $DryRun) {
-    $recallFeature = Get-WindowsOptionalFeature -Online -FeatureName "Recall" -EA 0
-    if ($recallFeature -and $recallFeature.State -eq 'Enabled') {
-        Disable-WindowsOptionalFeature -Online -FeatureName "Recall" -NoRestart -EA 0 | Out-Null
+Invoke-TrackedOperation -Name 'Recall optional feature' -Action 'Disable the Windows Recall optional feature when present' -Scope 'Machine' -Operation {
+    if (-not $DryRun) {
+        $recallFeature = Get-WindowsOptionalFeature -Online -FeatureName "Recall" -EA 0
+        if ($recallFeature -and $recallFeature.State -eq 'Enabled') {
+            Disable-WindowsOptionalFeature -Online -FeatureName "Recall" -NoRestart -EA Stop | Out-Null
+            $updatedRecall = Get-WindowsOptionalFeature -Online -FeatureName "Recall" -EA Stop
+            if ($updatedRecall.State -notin @('Disabled', 'DisablePending')) { throw "Recall optional feature remained '$($updatedRecall.State)'" }
+        }
     }
-}
+} | Out-Null
 
 # --- Disable IsoEnvBroker (Agent Workspaces) ---
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Services\IsoEnvBroker" -Name "Enabled" -Value 0
@@ -94,9 +98,21 @@ Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Mobility" -Name "
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "EnableMmx" -Value 0
 Remove-AppxDryRun -Pattern '*Microsoft.YourPhone*'
 Remove-AppxDryRun -Pattern '*MicrosoftWindows.CrossDevice*'
-if (-not $DryRun) {
-    Remove-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "PhoneLink" -Force -EA 0
-    Remove-ItemProperty -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "PhoneLinkAutoStart" -Force -EA 0
+$allowPhoneLinkCleanup = Test-IrreversibleOperationAllowed -Name 'Phone Link startup cleanup'
+if ($allowPhoneLinkCleanup) {
+    Invoke-TrackedOperation -Name 'Phone Link startup cleanup' -Action 'Remove Phone Link startup entries' -Scope 'CurrentUser' -Operation {
+        if (-not $DryRun) {
+            $phoneLinkRunPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+            $phoneLinkProperties = Get-ItemProperty -Path $phoneLinkRunPath -EA 0
+            foreach ($phoneLinkName in @('PhoneLink', 'PhoneLinkAutoStart')) {
+                if ($phoneLinkProperties.PSObject.Properties.Name -contains $phoneLinkName) {
+                    Remove-ItemProperty -Path $phoneLinkRunPath -Name $phoneLinkName -Force -EA Stop
+                }
+            }
+        }
+    } | Out-Null
+} else {
+    Write-Log "  Phone Link startup cleanup skipped (explicit approval required)" "WARNING"
 }
 
 Write-Log "  24H2/25H2/26H1 bloat disabled" "SUCCESS"

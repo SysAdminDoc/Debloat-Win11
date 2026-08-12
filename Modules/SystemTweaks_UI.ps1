@@ -29,15 +29,24 @@ if ($applyDarkMode) {
 
 # Remove Microsoft Store pin from taskbar
 if (-not $DryRun -and $allowUiCleanup) {
-    $taskbandPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
-    Remove-ItemProperty -Path $taskbandPath -Name "Favorites" -Force -EA 0
-    Remove-ItemProperty -Path $taskbandPath -Name "FavoritesResolve" -Force -EA 0
+    Invoke-TrackedOperation -Name 'Taskbar favorites' -Action 'Remove default taskbar pin state' -Scope 'CurrentUser' -Operation {
+        $taskbandPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
+        Remove-ItemProperty -Path $taskbandPath -Name "Favorites" -Force -EA Stop
+        Remove-ItemProperty -Path $taskbandPath -Name "FavoritesResolve" -Force -EA Stop
+    } | Out-Null
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Taskbar favorites' -Action 'Remove default taskbar pin state' -Scope 'CurrentUser' -Operation { } | Out-Null
 }
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "HubMode" -Value 1
 
 # Classic context menu
 if (-not $DryRun -and $allowUiCleanup) {
-    reg add "HKCU\SOFTWARE\CLASSES\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32" /ve /f 2>$null | Out-Null
+    Invoke-TrackedOperation -Name 'Classic context menu' -Action 'Configure classic context menu' -Scope 'CurrentUser' -Operation {
+        reg add "HKCU\SOFTWARE\CLASSES\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32" /ve /f 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "reg.exe exited with code $LASTEXITCODE" }
+    } | Out-Null
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Classic context menu' -Action 'Configure classic context menu' -Scope 'CurrentUser' -Operation { } | Out-Null
 }
 
 # Disable GameDVR
@@ -57,9 +66,15 @@ Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" 
 
 # Remove 3D Objects, Gallery, Home from Explorer
 if (-not $DryRun -and $allowUiCleanup) {
-    Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}" -Recurse -EA 0
-    Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}" -Recurse -EA 0
-    Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}" -Recurse -EA 0
+    Invoke-TrackedOperation -Name 'Explorer namespace cleanup' -Action 'Remove Explorer namespace entries' -Scope 'Machine' -Operation {
+        @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}"
+        ) | ForEach-Object { Remove-Item -LiteralPath $_ -Recurse -EA Stop }
+    } | Out-Null
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Explorer namespace cleanup' -Action 'Remove Explorer namespace entries' -Scope 'Machine' -Operation { } | Out-Null
 }
 
 # ============================================================================
@@ -71,14 +86,18 @@ Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "ShowFrequent" -Value 0
 
 if (-not $DryRun -and $allowUiCleanup) {
-    $shell = New-Object -ComObject Shell.Application
-    $quickAccess = $shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
-    $foldersToUnpin = @('Desktop', 'Downloads', 'Documents', 'Pictures', 'Music', 'Videos')
-    $quickAccess.Items() | ForEach-Object {
-        if ($foldersToUnpin -contains $_.Name) { $_.InvokeVerb("unpinfromhome") }
-    }
-    $quickAccessDB = "$env:APPDATA\Microsoft\Windows\Recent\AutomaticDestinations"
-    Remove-Item "$quickAccessDB\f01b4d95cf55d32a.automaticDestinations-ms" -Force -EA 0
+    Invoke-TrackedOperation -Name 'Quick Access cleanup' -Action 'Unpin default Explorer locations' -Scope 'CurrentUser' -Operation {
+        $shell = New-Object -ComObject Shell.Application
+        $quickAccess = $shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
+        $foldersToUnpin = @('Desktop', 'Downloads', 'Documents', 'Pictures', 'Music', 'Videos')
+        $quickAccess.Items() | ForEach-Object {
+            if ($foldersToUnpin -contains $_.Name) { $_.InvokeVerb("unpinfromhome") }
+        }
+        $quickAccessDB = "$env:APPDATA\Microsoft\Windows\Recent\AutomaticDestinations"
+        Remove-Item "$quickAccessDB\f01b4d95cf55d32a.automaticDestinations-ms" -Force -EA Stop
+    } | Out-Null
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Quick Access cleanup' -Action 'Unpin default Explorer locations' -Scope 'CurrentUser' -Operation { } | Out-Null
 }
 
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\CabinetState" -Name "FullPath" -Value 1
@@ -93,10 +112,14 @@ Write-Log "[Explorer] Removing Explorer clutter..." "SECTION"
 Set-Reg -Path "HKCU:\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}" -Name "System.IsPinnedToNameSpaceTree" -Value 0
 Set-Reg -Path "HKCU:\Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}" -Name "System.IsPinnedToNameSpaceTree" -Value 0
 if (-not $DryRun -and $allowUiCleanup) {
-    @(
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}",
-        "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}"
-    ) | ForEach-Object { Remove-Item $_ -Recurse -Force -EA 0 }
+    Invoke-TrackedOperation -Name 'Explorer namespace clutter' -Action 'Delete Explorer namespace clutter' -Scope 'Machine' -Operation {
+        @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}",
+            "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}"
+        ) | ForEach-Object { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
+    } | Out-Null
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Explorer namespace clutter' -Action 'Delete Explorer namespace clutter' -Scope 'Machine' -Operation { } | Out-Null
 }
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowSyncProviderNotifications" -Value 0
 if ([int]$osBuild -ge 22000) {
@@ -121,18 +144,22 @@ if ([int]$osBuild -ge 22000 -and -not $script:isLTSC) {
 # ============================================================================
 Write-Log "[Desktop] Cleaning desktop shortcuts..." "SECTION"
 if (-not $DryRun -and $allowUiCleanup) {
-    @(
-        "$env:PUBLIC\Desktop\Microsoft Edge.lnk",
-        "$env:USERPROFILE\Desktop\Microsoft Edge.lnk",
-        "$env:PUBLIC\Desktop\Microsoft Store.lnk",
-        "$env:USERPROFILE\Desktop\Microsoft Store.lnk"
-    ) | ForEach-Object { if (Test-Path $_) { Remove-Item $_ -Force -EA 0 } }
-    Get-ChildItem "$env:PUBLIC\Desktop\*.lnk" -EA 0 | ForEach-Object {
-        $target = (New-Object -COM WScript.Shell).CreateShortcut($_.FullName).TargetPath
-        if ($target -match 'Dell|HP|Lenovo|ASUS|Acer|MSI|Razer|McAfee|Norton|ExpressVPN|Dropbox') {
-            Remove-Item $_.FullName -Force -EA 0
+    Invoke-TrackedOperation -Name 'Desktop shortcut cleanup' -Action 'Delete vendor and default desktop shortcuts' -Scope 'Mixed' -Operation {
+        @(
+            "$env:PUBLIC\Desktop\Microsoft Edge.lnk",
+            "$env:USERPROFILE\Desktop\Microsoft Edge.lnk",
+            "$env:PUBLIC\Desktop\Microsoft Store.lnk",
+            "$env:USERPROFILE\Desktop\Microsoft Store.lnk"
+        ) | ForEach-Object { if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Force -EA Stop } }
+        Get-ChildItem "$env:PUBLIC\Desktop\*.lnk" -EA 0 | ForEach-Object {
+            $target = (New-Object -COM WScript.Shell).CreateShortcut($_.FullName).TargetPath
+            if ($target -match 'Dell|HP|Lenovo|ASUS|Acer|MSI|Razer|McAfee|Norton|ExpressVPN|Dropbox') {
+                Remove-Item -LiteralPath $_.FullName -Force -EA Stop
+            }
         }
-    }
+    } | Out-Null
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Desktop shortcut cleanup' -Action 'Delete vendor and default desktop shortcuts' -Scope 'Mixed' -Operation { } | Out-Null
 } elseif (-not $DryRun) {
     Write-Log "  Desktop shortcut cleanup skipped (explicit approval required)" "WARNING"
 }

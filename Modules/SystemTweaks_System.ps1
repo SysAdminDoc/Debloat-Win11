@@ -22,12 +22,18 @@ Write-Log "  Security settings applied" "SUCCESS"
 # TIME SYNCHRONIZATION
 # ============================================================================
 Write-Log "[Time] Configuring time sync..." "SECTION"
-if (-not $DryRun) {
-    Set-Service -Name 'W32Time' -StartupType Automatic -EA 0
-    Start-Service -Name 'W32Time' -EA 0
-    w32tm /resync /force 2>$null
-    w32tm /config /manualpeerlist:"time.windows.com" /syncfromflags:manual /reliable:yes /update 2>$null
-}
+Invoke-TrackedOperation -Name 'Windows Time synchronization' -Action 'Configure Windows Time service and resynchronize' -Scope 'Machine' -Operation {
+    if (-not $DryRun) {
+        Set-Service -Name 'W32Time' -StartupType Automatic -EA Stop
+        Start-Service -Name 'W32Time' -EA Stop
+        w32tm /resync /force 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "w32tm resync exited with code $LASTEXITCODE" }
+        w32tm /config /manualpeerlist:"time.windows.com" /syncfromflags:manual /reliable:yes /update 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "w32tm config exited with code $LASTEXITCODE" }
+    }
+} -Verification {
+    if ($DryRun) { $true } else { (Get-Service -Name 'W32Time' -EA Stop).StartType.ToString() -eq 'Automatic' }
+} | Out-Null
 Write-Log "  Time sync configured" "SUCCESS"
 
 # ============================================================================
@@ -44,6 +50,7 @@ Write-Log "  Driver updates disabled" "SUCCESS"
 # ============================================================================
 Write-Log "[Default Profile] Configuring default user settings..." "SECTION"
 
+$defaultProfileResult = Invoke-TrackedOperation -Name 'Default user profile cleanup' -Action 'Apply privacy and Explorer defaults to the Default profile hive' -Scope 'DefaultProfile' -RunDuringDryRun -Operation {
 if (-not $DryRun) {
     $defaultUserReg = "C:\Users\Default\NTUSER.DAT"
     if (Test-Path $defaultUserReg) {
@@ -79,7 +86,10 @@ if (-not $DryRun) {
             reg add "$hiveName\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null
             [gc]::Collect()
             Start-Sleep -Milliseconds 500
+            reg query "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v FeatureManagementEnabled 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Default profile verification failed with code $LASTEXITCODE" }
             reg unload $hiveName 2>$null
+            if ($LASTEXITCODE -ne 0) { throw "Default profile hive unload failed with code $LASTEXITCODE" }
             Write-Log "  Default profile configured" "SUCCESS"
         } else {
             Write-Log "  Could not load default profile" "INFO"
@@ -89,6 +99,7 @@ if (-not $DryRun) {
     }
 } else {
     Write-Log "  [DRY RUN] Would configure default user profile" "INFO"
+}
 }
 
 # ============================================================================
@@ -106,6 +117,7 @@ $contextMenuKeys = @(
 )
 $allowContextMenuCleanup = Test-IrreversibleOperationAllowed -Name 'Context menu cleanup'
 if (-not $DryRun -and $allowContextMenuCleanup) {
+    $contextMenuResult = Invoke-TrackedOperation -Name 'Context menu cleanup' -Action 'Backup and remove selected Explorer context-menu registrations' -Scope 'Machine' -Operation {
     foreach ($key in $contextMenuKeys) {
         reg export $key "$env:TEMP\ctx_export.reg" /y 2>$null
         if ($LASTEXITCODE -eq 0) {
@@ -115,7 +127,7 @@ if (-not $DryRun -and $allowContextMenuCleanup) {
                 Copy-Item "$env:TEMP\ctx_export.reg" $contextMenuBackup -Force
             }
         }
-        Remove-Item "$env:TEMP\ctx_export.reg" -Force -EA 0
+        if (Test-Path -LiteralPath "$env:TEMP\ctx_export.reg") { Remove-Item -LiteralPath "$env:TEMP\ctx_export.reg" -Force -EA Stop }
     }
     if (Test-Path $contextMenuBackup) {
         $script:manifest.changes.registry_deleted.Add("BACKUP: $contextMenuBackup") | Out-Null
@@ -133,26 +145,36 @@ if (-not $DryRun -and $allowContextMenuCleanup) {
 
     @('.bmp','.gif','.jpg','.jpeg','.png','.tif','.tiff') | ForEach-Object {
         reg delete "HKLM\SOFTWARE\Classes\SystemFileAssociations\$_\Shell\3D Edit" /f 2>$null
+        if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     }
     reg delete "HKLM\SOFTWARE\Classes\AppX43ber29p0nx6h3tj30w3pdbsqxqaxgjy\Shell\ShellEdit" /f 2>$null
+    if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     reg delete "HKCR\*\shellex\ContextMenuHandlers\ModernSharing" /f 2>$null
+    if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     @('HKCR\*', 'HKCR\Directory\Background', 'HKCR\Directory', 'HKCR\Drive') | ForEach-Object {
         reg delete "$_\shellex\ContextMenuHandlers\Sharing" /f 2>$null
+        if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     }
     reg delete "HKCR\Folder\ShellEx\ContextMenuHandlers\Library Location" /f 2>$null
+    if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     @('HKCR\AllFilesystemObjects', 'HKCR\CLSID\{450D8FBA-AD25-11D0-98A8-0800361B1103}', 'HKCR\Directory', 'HKCR\Drive') | ForEach-Object {
         reg delete "$_\shellex\ContextMenuHandlers\{596AB062-B4D2-4215-9F74-E9109B0A8153}" /f 2>$null
+        if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     }
     reg delete "HKCR\*\shell\pintohomefile" /f 2>$null
+    if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     @('HKCR\exefile', 'HKCR\batfile', 'HKCR\cmdfile', 'HKCR\Msi.Package') | ForEach-Object {
         reg delete "$_\shellex\ContextMenuHandlers\Compatibility" /f 2>$null
+        if ($LASTEXITCODE -gt 1) { throw "reg.exe context-menu delete exited with code $LASTEXITCODE" }
     }
     @(
         "$env:APPDATA\Microsoft\Windows\SendTo\Bluetooth File Transfer.LNK",
         "$env:APPDATA\Microsoft\Windows\SendTo\Fax Recipient.lnk"
-    ) | ForEach-Object { if (Test-Path $_) { Remove-Item $_ -Force -EA 0 } }
+    ) | ForEach-Object { if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Force -EA Stop } }
+    } | Out-Null
 } else {
     if ($DryRun) {
+        Invoke-TrackedOperation -Name 'Context menu cleanup' -Action 'Backup and remove selected Explorer context-menu registrations' -Scope 'Machine' -Operation { } | Out-Null
         Write-Log "  [DRY RUN] Would remove context menu bloat entries" "INFO"
     } else {
         Write-Log "  Context menu cleanup skipped (explicit approval required)" "WARNING"
@@ -180,14 +202,19 @@ $featuresToDisable = if ($script:configOverrides.ContainsKey('FeaturesToDisable'
 
 $allowOptionalFeatures = Test-IrreversibleOperationAllowed -Name 'Optional feature removal'
 if (-not $DryRun -and $allowOptionalFeatures) {
-    foreach ($feature in $featuresToDisable) {
-        $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -EA 0
-        if ($state -and $state.State -eq 'Enabled') {
-            Write-Log "  Disabling $feature..." "INFO"
-            Disable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart -EA 0 | Out-Null
+    Invoke-TrackedOperation -Name 'Optional feature removal' -Action 'Disable configured legacy Windows optional features' -Scope 'Machine' -Operation {
+        foreach ($feature in $featuresToDisable) {
+            $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -EA 0
+            if ($state -and $state.State -eq 'Enabled') {
+                Write-Log "  Disabling $feature..." "INFO"
+                Disable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart -EA Stop | Out-Null
+                $updated = Get-WindowsOptionalFeature -Online -FeatureName $feature -EA Stop
+                if ($updated.State -notin @('Disabled', 'DisablePending')) { throw "Optional feature '$feature' remained '$($updated.State)'" }
+            }
         }
-    }
+    } | Out-Null
 } elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Optional feature removal' -Action 'Disable configured legacy Windows optional features' -Scope 'Machine' -Operation { } | Out-Null
     Write-Log "  [DRY RUN] Would disable $($featuresToDisable.Count) optional features" "INFO"
 } else {
     Write-Log "  Optional feature removal skipped (explicit approval required)" "WARNING"
@@ -198,6 +225,7 @@ Write-Log "  Optional features configured" "SUCCESS"
 # ALL-USERS HKCU PROPAGATION (when -AllUsers is set)
 # ============================================================================
 if ($AllUsers -and -not $DryRun) {
+    $allUsersResult = Invoke-TrackedOperation -Name 'AllUsers HKCU propagation' -Action 'Apply HKCU tweak catalog to loaded user profiles' -Scope 'AllUsers' -Operation {
     Write-Log "[AllUsers] Applying HKCU tweaks to all user profiles..." "SECTION"
 
     $hkcuDataFile = Join-Path $PSScriptRoot 'HkcuTweaks.psd1'
@@ -216,20 +244,28 @@ if ($AllUsers -and -not $DryRun) {
         $hiveKey = "AllUsers_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
         $hiveName = "HKU\$hiveKey"
         reg load $hiveName $ntuser 2>$null
-        if ($LASTEXITCODE -ne 0) { continue }
+        if ($LASTEXITCODE -ne 0) {
+            Register-OperationResult -Name "AllUsers:$($userProf.Name)" -Action 'Load user registry hive' -Scope 'User' -Status 'Skipped' -ErrorMessage 'Hive could not be loaded (locked or inaccessible)'
+            Write-Log "  Skipping $($userProf.Name): user hive could not be loaded" "WARNING"
+            continue
+        }
         foreach ($tweak in $hkcuTweaks) {
             $tweakType = if ($tweak.ContainsKey('Type') -and $tweak.Type) { [string]$tweak.Type } else { 'DWord' }
             $regPath = "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)"
-            if (!(Test-Path $regPath)) { New-Item -Path $regPath -Force -EA 0 | Out-Null }
-            Set-ItemProperty -Path $regPath -Name $tweak.Name -Value $tweak.Value -Type $tweakType -Force -EA 0
+            if (!(Test-Path $regPath)) { New-Item -Path $regPath -Force -EA Stop | Out-Null }
+            Set-ItemProperty -Path $regPath -Name $tweak.Name -Value $tweak.Value -Type $tweakType -Force -EA Stop
         }
         [gc]::Collect()
         Start-Sleep -Milliseconds 200
         reg unload $hiveName 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Could not unload user hive $hiveName (code $LASTEXITCODE)" }
+        Register-OperationResult -Name "AllUsers:$($userProf.Name)" -Action 'Apply HKCU tweak catalog to user profile' -Scope 'User' -Status 'Succeeded'
         $appliedCount++
     }
     Write-Log "  Applied HKCU tweaks to $appliedCount user profiles" "SUCCESS"
+    } | Out-Null
 } elseif ($AllUsers -and $DryRun) {
+    Invoke-TrackedOperation -Name 'AllUsers HKCU propagation' -Action 'Apply HKCU tweak catalog to loaded user profiles' -Scope 'AllUsers' -Operation { } | Out-Null
     $profileCount = (Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default User|All Users)$' }).Count
     Write-Log "  [DRY RUN] Would apply HKCU tweaks to $profileCount user profiles" "INFO"
 }

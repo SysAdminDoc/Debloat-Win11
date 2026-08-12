@@ -89,31 +89,32 @@ if (Test-PhaseEnabled 'Privacy') {
 Write-Log "[Cleanup] Clearing temp files..." "SECTION"
 $allowTempCleanup = Test-IrreversibleOperationAllowed -Name 'Temporary file cleanup'
 
-if (-not $DryRun -and $allowTempCleanup) {
-    # System temp
-    Remove-Item "$env:TEMP\*" -Recurse -Force -EA 0
-    Remove-Item "C:\Windows\Temp\*" -Recurse -Force -EA 0
-
-    # User temps (all profiles)
-    $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
-    foreach ($userProf in $userProfiles) {
-        Remove-Item "$($userProf.FullName)\AppData\Local\Temp\*" -Recurse -Force -EA 0
-    }
-
-    # Windows Update cache
-    Stop-Service -Name wuauserv -Force -EA 0
-    Remove-Item "C:\Windows\SoftwareDistribution\Download\*" -Recurse -Force -EA 0
-
-    # Prefetch
-    Remove-Item "C:\Windows\Prefetch\*" -Force -EA 0
-
-    # Delivery Optimization cache
-    Remove-Item "C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\*" -Recurse -Force -EA 0
-} elseif ($DryRun) {
+if ($DryRun) {
+    $tempCleanupResult = Invoke-TrackedOperation -Name 'Temporary file cleanup' -Action 'Delete temp, prefetch, update, and delivery caches' -Scope 'Mixed' -Operation { }
     Write-Log "  [DRY RUN] Would clear temp, prefetch, WU cache, and delivery optimization cache" "INFO"
+} elseif ($allowTempCleanup) {
+    $tempCleanupResult = Invoke-TrackedOperation -Name 'Temporary file cleanup' -Action 'Delete temp, prefetch, update, and delivery caches' -Scope 'Mixed' -Operation {
+        @(
+            "$env:TEMP\*",
+            "C:\Windows\Temp\*",
+            "C:\Windows\SoftwareDistribution\Download\*",
+            "C:\Windows\Prefetch\*",
+            "C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\*"
+        ) | ForEach-Object {
+            Get-ChildItem -Path $_ -Force -EA 0 | Remove-Item -Recurse -Force -EA Stop
+        }
+
+        $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA Stop | Where-Object { $_.Name -notmatch '^(Public|Default|Default User|All Users)$' }
+        foreach ($userProf in $userProfiles) {
+            Get-ChildItem -Path "$($userProf.FullName)\AppData\Local\Temp\*" -Force -EA 0 | Remove-Item -Recurse -Force -EA Stop
+        }
+
+        Stop-Service -Name wuauserv -Force -EA Stop
+    } | Out-Null
 } else {
+    $tempCleanupResult = $false
     Write-Log "  Temp file cleanup skipped (explicit approval required)" "WARNING"
 }
 
-Write-Log "  Temp files cleared" "SUCCESS"
+if ($tempCleanupResult -and -not $DryRun) { Write-Log "  Temp files cleared" "SUCCESS" }
 } else { Write-Log "[Cleanup] Temp cleanup SKIPPED (Privacy phase excluded)" "INFO" }

@@ -27,13 +27,19 @@ Remove-AppxDryRun -Pattern '*Gaming*'
 
 # Remove Xbox folders
 if (-not $DryRun) {
-    @(
-        "$env:LOCALAPPDATA\Packages\Microsoft.XboxIdentityProvider*",
-        "$env:LOCALAPPDATA\Packages\Microsoft.Xbox*",
-        "$env:LOCALAPPDATA\Packages\Microsoft.GamingServices*"
-    ) | ForEach-Object {
-        Get-Item $_ -EA 0 | Remove-Item -Recurse -Force -EA 0
-    }
+    Invoke-TrackedOperation -Name 'Xbox package folders' -Action 'Delete residual Xbox package folders' -Scope 'CurrentUser' -Operation {
+        @(
+            "$env:LOCALAPPDATA\Packages\Microsoft.XboxIdentityProvider*",
+            "$env:LOCALAPPDATA\Packages\Microsoft.Xbox*",
+            "$env:LOCALAPPDATA\Packages\Microsoft.GamingServices*"
+        ) | ForEach-Object {
+            Get-Item -Path $_ -EA 0 | ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force -EA Stop
+            }
+        }
+    } | Out-Null
+} else {
+    Invoke-TrackedOperation -Name 'Xbox package folders' -Action 'Delete residual Xbox package folders' -Scope 'CurrentUser' -Operation { } | Out-Null
 }
 
 # Set RemoveDefaultMicrosoftStorePackages policy on Enterprise/Education 24H2+
@@ -42,7 +48,13 @@ if ($editionId -match 'Enterprise|Education' -and [int]$osBuild -ge 26100) {
     $policyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx"
     Set-Reg -Path $policyPath -Name "RemoveDefaultMicrosoftStorePackages" -Value 1
     $pfnPath = "$policyPath\RemoveDefaultMicrosoftStorePackages"
-    if (-not $DryRun -and !(Test-Path $pfnPath)) { New-Item -Path $pfnPath -Force | Out-Null }
+    if (-not $DryRun -and !(Test-Path $pfnPath)) {
+        Invoke-TrackedOperation -Name 'Store package removal policy path' -Action 'Create policy package list key' -Scope 'Machine' -Operation {
+            New-Item -Path $pfnPath -Force -EA Stop | Out-Null
+        } -Verification { Test-Path -LiteralPath $pfnPath } | Out-Null
+    } elseif ($DryRun) {
+        Invoke-TrackedOperation -Name 'Store package removal policy path' -Action 'Create policy package list key' -Scope 'Machine' -Operation { } | Out-Null
+    }
     $storePfns = @(
         'Clipchamp.Clipchamp_yxz26nhyzhsrt',
         'Microsoft.BingNews_8wekyb3d8bbwe',
@@ -115,6 +127,13 @@ if (-not $DryRun) {
         "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Windows Accessories\Remote Desktop Connection.lnk",
         "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Accessories\Remote Desktop Connection.lnk"
     ) | ForEach-Object {
-        if (Test-Path $_) { Remove-Item $_ -Force -EA 0 }
+        $shortcutPath = $_
+        if (Test-Path -LiteralPath $shortcutPath) {
+            Invoke-TrackedOperation -Name $shortcutPath -Action 'Delete Remote Desktop shortcut' -Scope 'Mixed' -Operation {
+                Remove-Item -LiteralPath $shortcutPath -Force -EA Stop
+            } -Verification { -not (Test-Path -LiteralPath $shortcutPath) } | Out-Null
+        }
     }
+} else {
+    Invoke-TrackedOperation -Name 'Remote Desktop shortcuts' -Action 'Delete Remote Desktop shortcuts' -Scope 'Mixed' -Operation { } | Out-Null
 }

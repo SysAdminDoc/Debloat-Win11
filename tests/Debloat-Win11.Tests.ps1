@@ -174,6 +174,35 @@ Describe 'Service Operation Result Fidelity' {
     }
 }
 
+Describe 'Verified Operation Contract' {
+    It 'defines one tracked helper with verification and failure registration' {
+        $scriptContent | Should -Match 'function Invoke-TrackedOperation'
+        $scriptContent | Should -Match '\[scriptblock\]\$Verification'
+        $scriptContent | Should -Match 'Post-operation verification failed'
+        $scriptContent | Should -Match 'Register-OperationFailure'
+    }
+
+    It 'initializes operation results and incomplete-run metadata' {
+        $scriptContent | Should -Match 'operations\s*=\s*\[System\.Collections\.ArrayList\]'
+        $scriptContent | Should -Match 'operation_summary\s*=\s*\[ordered\]@'
+        $scriptContent | Should -Match 'OperationsFailed'
+        $scriptContent | Should -Match 'manifest\.status\s*='
+        $scriptContent | Should -Match '\$DryRun\)\s*\{\s*''Planned''\s*\}'
+    }
+
+    It 'renders operation names, scopes, statuses, and errors in HTML' {
+        $scriptContent | Should -Match 'Operation Results'
+        $scriptContent | Should -Match 'ConvertTo-HtmlCell \$_.error'
+        $scriptContent | Should -Match '<th>Scope</th><th>Status</th><th>Error</th>'
+    }
+
+    It 'uses Pester Should-Invoke syntax for cross-version mock assertions' {
+        $testsContent = Get-Content $PSScriptRoot\Debloat-Win11.Tests.ps1 -Raw
+        $testsContent | Should -Not -Match 'Assert-MockCalled\s+\w+\s+-Times'
+        $testsContent | Should -Match 'Should -Invoke'
+    }
+}
+
 Describe 'DryRun Guards' {
     It 'has at least 10 DryRun guard blocks covering destructive phases' {
         $dryRunGuards = ([regex]::Matches($allContent, 'if\s*\(\s*-not\s+\$DryRun\s*\)')).Count
@@ -974,8 +1003,8 @@ Describe 'Destructive Operation Behavior Mocks' {
         Invoke-TestServiceDisable -ServiceName 'TestSvc'
 
         $script:testManifest.changes.services_disabled[0].original_startup_type | Should -Be 'Manual'
-        Assert-MockCalled Stop-Service -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'TestSvc' -and $Force }
-        Assert-MockCalled Set-Service -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'TestSvc' -and $StartupType -eq 'Disabled' }
+        Should -Invoke Stop-Service -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'TestSvc' -and $Force }
+        Should -Invoke Set-Service -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'TestSvc' -and $StartupType -eq 'Disabled' }
     }
 
     It 'mocks wevtutil and clears only configured event logs' {
@@ -983,9 +1012,9 @@ Describe 'Destructive Operation Behavior Mocks' {
 
         Invoke-TestEventLogClear -ClearEventLogs @('Application', '', 'System')
 
-        Assert-MockCalled wevtutil -Times 2 -Exactly -Scope It
-        Assert-MockCalled wevtutil -Times 1 -Exactly -Scope It -ParameterFilter { $args[0] -eq 'cl' -and $args[1] -eq 'Application' }
-        Assert-MockCalled wevtutil -Times 1 -Exactly -Scope It -ParameterFilter { $args[0] -eq 'cl' -and $args[1] -eq 'System' }
+        Should -Invoke wevtutil -Times 2 -Exactly -Scope It
+        Should -Invoke wevtutil -Times 1 -Exactly -Scope It -ParameterFilter { $args[0] -eq 'cl' -and $args[1] -eq 'Application' }
+        Should -Invoke wevtutil -Times 1 -Exactly -Scope It -ParameterFilter { $args[0] -eq 'cl' -and $args[1] -eq 'System' }
     }
 
     It 'mocks WIM mount and discards image changes after failure' {
@@ -994,9 +1023,9 @@ Describe 'Destructive Operation Behavior Mocks' {
 
         { Invoke-TestWimMutation -ShouldFail } | Should -Throw 'simulated WIM failure'
 
-        Assert-MockCalled Mount-WindowsImage -Times 1 -Exactly -Scope It
-        Assert-MockCalled Dismount-WindowsImage -Times 1 -Exactly -Scope It -ParameterFilter { $Path -eq 'C:\Mount' -and $Discard }
-        Assert-MockCalled Dismount-WindowsImage -Times 0 -Exactly -Scope It -ParameterFilter { $Save }
+        Should -Invoke Mount-WindowsImage -Times 1 -Exactly -Scope It
+        Should -Invoke Dismount-WindowsImage -Times 1 -Exactly -Scope It -ParameterFilter { $Path -eq 'C:\Mount' -and $Discard }
+        Should -Invoke Dismount-WindowsImage -Times 0 -Exactly -Scope It -ParameterFilter { $Save }
     }
 
     It 'mocks registry setters and avoids host writes in DryRun' {
@@ -1009,8 +1038,8 @@ Describe 'Destructive Operation Behavior Mocks' {
 
         $script:testManifest.changes.registry_set[0].old_value | Should -Be 3
         $script:testManifest.changes.registry_set[0].new_value | Should -Be 1
-        Assert-MockCalled Set-ItemProperty -Times 0 -Exactly -Scope It
-        Assert-MockCalled New-Item -Times 0 -Exactly -Scope It
+        Should -Invoke Set-ItemProperty -Times 0 -Exactly -Scope It
+        Should -Invoke New-Item -Times 0 -Exactly -Scope It
     }
 
     It 'mocks report generation and encodes manifest-derived values' {
@@ -1020,7 +1049,7 @@ Describe 'Destructive Operation Behavior Mocks' {
             [pscustomobject]@{ Name = '<Path>'; Value = '"quoted" & raw' }
         )
 
-        Assert-MockCalled Set-Content -Times 1 -Exactly -Scope It -ParameterFilter {
+        Should -Invoke Set-Content -Times 1 -Exactly -Scope It -ParameterFilter {
             $Path -eq 'C:\Temp\report.html' -and
             $Value -match '&lt;Path&gt;' -and
             $Value -match '&quot;quoted&quot; &amp; raw'

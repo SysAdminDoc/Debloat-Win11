@@ -11,6 +11,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
     Write-Log "[Office] Office Nuclear Removal..." "SECTION"
     Write-Rationale 'Office'
 
+    $officeResult = Invoke-TrackedOperation -Name 'Office removal' -Action 'Remove Office, OneNote, services, tasks, files, and registry entries' -Scope 'Machine' -RunDuringDryRun -Operation {
     if (-not $DryRun) {
         # Kill OneNote standalone installs first (all languages) - NUCLEAR
         Write-Log "  Nuking OneNote installations..." "INFO"
@@ -27,10 +28,10 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
                     # Try MSI uninstall
                     $guid = $_.PSChildName
                     if ($guid -match '^\{') {
-                        Start-Process 'msiexec.exe' -ArgumentList "/x$guid /qn /norestart" -Wait -WindowStyle Hidden -EA 0
+                        Start-Process 'msiexec.exe' -ArgumentList "/x$guid /qn /norestart" -Wait -WindowStyle Hidden -EA Stop
                     }
                     # Delete registry entry regardless (nuclear)
-                    Remove-Item $_.PSPath -Recurse -Force -EA 0
+                    Remove-Item $_.PSPath -Recurse -Force -EA Stop
                 }
             }
         }
@@ -43,7 +44,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
             "$env:LOCALAPPDATA\Microsoft\OneNote",
             "$env:APPDATA\Microsoft\OneNote"
         ) | ForEach-Object {
-            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+            if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
         }
 
         # Check if Office is installed
@@ -66,29 +67,31 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
             )
             # Only kill OneDrive if not in use
             if (-not $script:onedriveInUse) { $officeProcs += 'OneDrive' }
-            $officeProcs | ForEach-Object { Get-Process -Name $_ -EA 0 | Stop-Process -Force -EA 0 }
+            $officeProcs | ForEach-Object { Get-Process -Name $_ -EA 0 | Stop-Process -Force -EA Stop }
 
             # Stop and delete Office services
             Write-Log "  Nuking Office services..." "INFO"
             @('ClickToRunSvc','OfficeSvc','ose','ose64','osppsvc') | ForEach-Object {
-                if (Get-Service -Name $_ -EA 0) {
+                $officeService = Get-Service -Name $_ -EA 0
+                if ($officeService) {
                     $script:manifest.changes.services_deleted.Add($_) | Out-Null
+                    Stop-Service -Name $_ -Force -EA Stop
+                    Set-Service -Name $_ -StartupType Disabled -EA Stop
+                    sc.exe delete $_ 2>$null
+                    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1060) { throw "sc.exe delete $_ exited with code $LASTEXITCODE" }
+                    $script:counters.OfficeRemoved++
                 }
-                Stop-Service -Name $_ -Force -EA 0
-                Set-Service -Name $_ -StartupType Disabled -EA 0
-                sc.exe delete $_ 2>$null
-                $script:counters.OfficeRemoved++
             }
 
             # Delete Office scheduled tasks
             Write-Log "  Nuking Office scheduled tasks..." "INFO"
-            Get-ScheduledTask -TaskPath "\Microsoft\Office\*" -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA 0
+            Get-ScheduledTask -TaskPath "\Microsoft\Office\*" -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA Stop
             @(
                 'Office Automatic Updates*','Office ClickToRun*','Office Feature Updates*',
                 'Office Serviceability*','OfficeTelemetry*','Office Background*',
                 'Office Performance*','Office Subscription*','Office SxS*'
             ) | ForEach-Object {
-                Get-ScheduledTask -TaskName $_ -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA 0
+                Get-ScheduledTask -TaskName $_ -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA Stop
             }
 
             # Nuclear file deletion
@@ -112,7 +115,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
                 "$env:APPDATA\Microsoft\Office"
             ) | ForEach-Object {
                 if (Test-Path $_) {
-                    Remove-Item $_ -Recurse -Force -EA 0
+                    Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop
                     $script:counters.OfficeRemoved++
                 }
             }
@@ -124,7 +127,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
                     "$($userProf.FullName)\AppData\Local\Microsoft\Office",
                     "$($userProf.FullName)\AppData\Roaming\Microsoft\Office"
                 ) | ForEach-Object {
-                    if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+                    if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
                 }
             }
 
@@ -140,7 +143,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
                 "HKCU:\SOFTWARE\Microsoft\Office\15.0",
                 "HKCU:\SOFTWARE\Microsoft\Office\16.0"
             ) | ForEach-Object {
-                if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+                if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
             }
 
             # Delete Office Add/Remove Programs entries
@@ -151,7 +154,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
                 Get-ChildItem $_ -EA 0 | ForEach-Object {
                     $props = Get-ItemProperty $_.PSPath -EA 0
                     if ($props.DisplayName -match 'Microsoft 365|Microsoft Office|Office 16 Click-to-Run') {
-                        Remove-Item $_.PSPath -Recurse -Force -EA 0
+                        Remove-Item $_.PSPath -Recurse -Force -EA Stop
                     }
                 }
             }
@@ -167,7 +170,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
                 Get-ChildItem -Path $_ -Filter "*.lnk" -Recurse -EA 0 | ForEach-Object {
                     $target = (New-Object -COM WScript.Shell).CreateShortcut($_.FullName).TargetPath
                     if ($target -match 'Office|WINWORD|EXCEL|POWERPNT|OUTLOOK|ONENOTE|MSACCESS|ClickToRun') {
-                        Remove-Item $_.FullName -Force -EA 0
+                        Remove-Item $_.FullName -Force -EA Stop
                     }
                 }
             }
@@ -175,7 +178,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
             # Clean Office licenses (Office-only; do NOT touch Windows product key)
             Write-Log "  Cleaning Office licenses..." "INFO"
             Get-CimInstance -Query "SELECT * FROM SoftwareLicensingProduct WHERE ApplicationId='0ff1ce15-a989-479d-af46-f275c6370663' AND PartialProductKey IS NOT NULL" -EA 0 | ForEach-Object {
-                Invoke-CimMethod -InputObject $_ -MethodName 'UninstallProductKey' -EA 0
+                Invoke-CimMethod -InputObject $_ -MethodName 'UninstallProductKey' -EA Stop
             }
 
             Write-Log "  Office nuclear removal complete" "SUCCESS"
@@ -185,3 +188,6 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
     } else {
         Write-Log "  [DRY RUN] Would perform full Office nuclear removal" "INFO"
     }
+
+    }
+    if ($officeResult) { Write-Log "  Office nuclear removal processed" "SUCCESS" } else { Write-Log "  Office nuclear removal failed" "ERROR" }

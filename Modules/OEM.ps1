@@ -9,6 +9,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'OEM removal')) {
     return
 }
 
+$oemResult = Invoke-TrackedOperation -Name 'OEM cleanup' -Action 'Remove selected OEM packages, services, tasks, files, and registry entries' -Scope 'AllUsers' -RunDuringDryRun -Operation {
 Write-Log "[OEM] Removing OEM bloatware..." "SECTION"
 Write-Rationale 'OEM'
 
@@ -36,13 +37,13 @@ $oemServices = @(Get-Service | Where-Object { Test-OemTarget $_.Name $_.DisplayN
 $script:counters.OEMCleaned += $oemServices.Count
 if (-not $DryRun) {
     foreach ($svc in $oemServices) {
-        Stop-Service -Name $svc.Name -Force -EA 0
-        Set-Service -Name $svc.Name -StartupType Disabled -EA 0
+        Stop-Service -Name $svc.Name -Force -EA Stop
+        Set-Service -Name $svc.Name -StartupType Disabled -EA Stop
     }
 
     Write-Log "  Killing OEM processes..." "INFO"
     Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | ForEach-Object {
-        Stop-Process -Id $_.Id -Force -EA 0
+        Stop-Process -Id $_.Id -Force -EA Stop
     }
 }
 
@@ -52,7 +53,7 @@ foreach ($pattern in $oemAppxPatterns) {
     Remove-AppxDryRun -Pattern $pattern -AllowOutsideAppX
 }
 if (-not $DryRun) {
-    Get-Package *Dell* 2>$null | Uninstall-Package -Force 2>$null
+    Get-Package *Dell* -EA 0 | Uninstall-Package -Force -EA Stop
 }
 
 Write-Log "  OEM AppX packages removed" "SUCCESS"
@@ -64,7 +65,7 @@ Write-Log "[OEM] OEM Nuclear Clean..." "SECTION"
 
 if (-not $DryRun) {
     # Kill all OEM processes again (in case any respawned)
-    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | Stop-Process -Force -EA 0
+    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | Stop-Process -Force -EA Stop
 
     # Delete OEM folders - Program Files
     Write-Log "  Nuking OEM folders..." "INFO"
@@ -78,8 +79,10 @@ if (-not $DryRun) {
         if (Test-Path $_) {
             $script:manifest.changes.folders_deleted.Add($_) | Out-Null
             takeown /F $_ /R /A /D Y 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "takeown failed for $_ with code $LASTEXITCODE" }
             icacls $_ /grant Administrators:F /T /C /Q 2>$null | Out-Null
-            Remove-Item $_ -Recurse -Force -EA 0
+            if ($LASTEXITCODE -ne 0) { throw "icacls failed for $_ with code $LASTEXITCODE" }
+            Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop
         }
     }
 
@@ -87,7 +90,7 @@ if (-not $DryRun) {
     $dellStartMenu = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Dell"
     if (Test-Path $dellStartMenu) {
         $script:manifest.changes.folders_deleted.Add($dellStartMenu) | Out-Null
-        Remove-Item $dellStartMenu -Recurse -Force -EA 0
+        Remove-Item -LiteralPath $dellStartMenu -Recurse -Force -EA Stop
     }
 
     # Delete other OEM Start Menu folders
@@ -99,13 +102,13 @@ if (-not $DryRun) {
         "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\MSI",
         "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Razer"
     ) | ForEach-Object {
-        if (Test-Path $_) { $script:manifest.changes.folders_deleted.Add($_) | Out-Null; Remove-Item $_ -Recurse -Force -EA 0 }
+        if (Test-Path -LiteralPath $_) { $script:manifest.changes.folders_deleted.Add($_) | Out-Null; Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
     }
 
     # Clear Accessibility shortcuts (common location)
     $accessibilityCommon = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Accessibility"
     if (Test-Path $accessibilityCommon) {
-        Remove-Item "$accessibilityCommon\*" -Recurse -Force -EA 0
+        Get-ChildItem -Path "$accessibilityCommon\*" -Force -EA 0 | Remove-Item -Recurse -Force -EA Stop
     }
 
     @(
@@ -159,7 +162,7 @@ if (-not $DryRun) {
     ) | ForEach-Object {
         if (Test-Path $_) {
             $script:manifest.changes.folders_deleted.Add($_) | Out-Null
-            Remove-Item $_ -Recurse -Force -EA 0
+            Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop
         }
     }
 
@@ -175,13 +178,13 @@ if (-not $DryRun) {
             "$($userProf.FullName)\AppData\Local\Lenovo",
             "$($userProf.FullName)\AppData\Roaming\Lenovo"
         ) | ForEach-Object {
-            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+            if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
         }
 
         # Clear Accessibility shortcuts
         $accessibilityPath = "$($userProf.FullName)\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Accessibility"
         if (Test-Path $accessibilityPath) {
-            Remove-Item "$accessibilityPath\*" -Recurse -Force -EA 0
+            Get-ChildItem -Path "$accessibilityPath\*" -Force -EA 0 | Remove-Item -Recurse -Force -EA Stop
         }
     }
 
@@ -189,22 +192,24 @@ if (-not $DryRun) {
     Write-Log "  Nuking OEM services..." "INFO"
     Get-Service | Where-Object { Test-OemTarget $_.Name $_.DisplayName } | ForEach-Object {
         $script:manifest.changes.services_deleted.Add($_.Name) | Out-Null
-        Stop-Service -Name $_.Name -Force -EA 0
+        Stop-Service -Name $_.Name -Force -EA Stop
         sc.exe delete $_.Name 2>$null
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1060) { throw "sc.exe delete $($_.Name) exited with code $LASTEXITCODE" }
     }
 
     # Disable WavesSvc64 specifically
     if (Get-Service -Name 'WavesSvc64' -EA 0) {
         $script:manifest.changes.services_deleted.Add('WavesSvc64') | Out-Null
+        Stop-Service -Name 'WavesSvc64' -Force -EA Stop
+        Set-Service -Name 'WavesSvc64' -StartupType Disabled -EA Stop
+        sc.exe delete 'WavesSvc64' 2>$null
+        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1060) { throw "sc.exe delete WavesSvc64 exited with code $LASTEXITCODE" }
     }
-    Stop-Service -Name 'WavesSvc64' -Force -EA 0
-    Set-Service -Name 'WavesSvc64' -StartupType Disabled -EA 0
-    sc.exe delete 'WavesSvc64' 2>$null
 
     # Delete OEM scheduled tasks
     Write-Log "  Nuking OEM scheduled tasks..." "INFO"
     Get-ScheduledTask -EA 0 | Where-Object { $_.TaskName -match 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer' -or $_.TaskPath -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer' } | ForEach-Object {
-        Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -EA 0
+        Unregister-ScheduledTask -TaskName $_.TaskName -Confirm:$false -EA Stop
     }
 } else {
     Write-Log "  [DRY RUN] Would nuke OEM folders, services, tasks, and registry" "INFO"
@@ -288,8 +293,8 @@ foreach ($taskPattern in $tasksToDisable) {
 
 # Unregister Xbox scheduled tasks completely
 if (-not $DryRun) {
-    Get-ScheduledTask -TaskPath '\Microsoft\XblGameSave\' -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA 0
-    Get-ScheduledTask -TaskName '*Xbl*' -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA 0
+    Get-ScheduledTask -TaskPath '\Microsoft\XblGameSave\' -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA Stop
+    Get-ScheduledTask -TaskName '*Xbl*' -EA 0 | Unregister-ScheduledTask -Confirm:$false -EA Stop
 }
 
 if (-not $DryRun) {
@@ -325,7 +330,7 @@ if (-not $DryRun) {
     ) | ForEach-Object {
         if (Test-Path $_) {
             $script:manifest.changes.registry_deleted.Add($_) | Out-Null
-            Remove-Item $_ -Recurse -Force -EA 0
+            Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop
         }
     }
 
@@ -339,7 +344,7 @@ if (-not $DryRun) {
         Get-ChildItem $path -EA 0 | ForEach-Object {
             $props = Get-ItemProperty $_.PSPath -EA 0
             if ($props.DisplayName -match 'Dell|MyDell|HP Support|HP System|HP Touchpoint|HP JumpStart|HP Customer|Lenovo|Realtek|Waves|ASUS|Armoury|MyASUS|ROG|Acer|AcerCare|MSI|Dragon Center|Mystic Light|Razer|Synapse|Cortex' -and $props.DisplayName -notmatch 'Dell ControlVault|Dell MD Storage|Dell OpenManage|Intel|Realtek.*Driver') {
-                    Remove-Item $_.PSPath -Recurse -Force -EA 0
+                    Remove-Item $_.PSPath -Recurse -Force -EA Stop
             }
         }
     }
@@ -375,7 +380,7 @@ if (-not $DryRun) {
     foreach ($path in $startupPaths) {
         $props = Get-ItemProperty $path -EA 0
         $props.PSObject.Properties | Where-Object { $_.Value -match 'dell|hp|lenovo|realtek|waves|asus|acer|msi|razer' -and $_.Value -notmatch 'intel' } | ForEach-Object {
-            Remove-ItemProperty -Path $path -Name $_.Name -Force -EA 0
+            Remove-ItemProperty -Path $path -Name $_.Name -Force -EA Stop
         }
     }
 
@@ -384,27 +389,35 @@ if (-not $DryRun) {
 
     # Remove WavesSvc / Waves MaxxAudio from startup
     foreach ($path in $startupPaths) {
-        Remove-ItemProperty -Path $path -Name 'WavesSvc64' -Force -EA 0
-        Remove-ItemProperty -Path $path -Name 'WavesMaxxAudio' -Force -EA 0
-        Remove-ItemProperty -Path $path -Name 'Waves MaxxAudio' -Force -EA 0
+        $startupProps = Get-ItemProperty -Path $path -EA 0
+        foreach ($startupName in @('WavesSvc64', 'WavesMaxxAudio', 'Waves MaxxAudio')) {
+            if ($startupProps.PSObject.Properties.Name -contains $startupName) {
+                Remove-ItemProperty -Path $path -Name $startupName -Force -EA Stop
+            }
+        }
     }
 
     # Disable via registry (Task Manager startup apps use this)
     $startupApprovedPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
     if (Test-Path $startupApprovedPath) {
-        Remove-ItemProperty -Path $startupApprovedPath -Name 'WavesSvc64' -Force -EA 0
+        $startupApproved = Get-ItemProperty -Path $startupApprovedPath -EA 0
+        if ($startupApproved.PSObject.Properties.Name -contains 'WavesSvc64') { Remove-ItemProperty -Path $startupApprovedPath -Name 'WavesSvc64' -Force -EA Stop }
     }
     $startupApprovedPath32 = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
     if (Test-Path $startupApprovedPath32) {
-        Remove-ItemProperty -Path $startupApprovedPath32 -Name 'WavesSvc64' -Force -EA 0
+        $startupApproved32 = Get-ItemProperty -Path $startupApprovedPath32 -EA 0
+        if ($startupApproved32.PSObject.Properties.Name -contains 'WavesSvc64') { Remove-ItemProperty -Path $startupApprovedPath32 -Name 'WavesSvc64' -Force -EA Stop }
     }
     $startupApprovedPath32_2 = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'
     if (Test-Path $startupApprovedPath32_2) {
-        Remove-ItemProperty -Path $startupApprovedPath32_2 -Name 'WavesSvc64' -Force -EA 0
+        $startupApproved32_2 = Get-ItemProperty -Path $startupApprovedPath32_2 -EA 0
+        if ($startupApproved32_2.PSObject.Properties.Name -contains 'WavesSvc64') { Remove-ItemProperty -Path $startupApprovedPath32_2 -Name 'WavesSvc64' -Force -EA Stop }
     }
 
     # Final process kill
-    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | Stop-Process -Force -EA 0
+    Get-Process -EA 0 | Where-Object { Test-OemTarget $_.Name ($_.Path -replace '.*\\','') } | Stop-Process -Force -EA Stop
 }
 
 Write-Log "  OEM nuclear clean complete" "SUCCESS"
+}
+if ($oemResult) { Write-Log "  OEM cleanup processed" "SUCCESS" } else { Write-Log "  OEM cleanup failed" "ERROR" }

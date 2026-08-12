@@ -11,9 +11,10 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'OneDrive removal')) {
     Write-Log "[OneDrive] Removing OneDrive..." "SECTION"
     Write-Rationale 'OneDrive'
 
+    $oneDriveResult = Invoke-TrackedOperation -Name 'OneDrive removal' -Action 'Uninstall OneDrive and remove residual files' -Scope 'AllUsers' -RunDuringDryRun -Operation {
     if (-not $DryRun) {
         # Kill OneDrive processes
-        Stop-Process -Name 'OneDrive', 'OneDriveSetup' -Force -EA 0
+        Get-Process -Name 'OneDrive', 'OneDriveSetup' -EA 0 | Stop-Process -Force -EA Stop
 
         # Run official uninstaller (fast, ~5 seconds)
         $oneDrivePaths = @(
@@ -24,7 +25,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'OneDrive removal')) {
         foreach ($path in $oneDrivePaths) {
             if (Test-Path $path) {
                 Write-Log "  Running OneDrive uninstaller..." "INFO"
-                Start-Process $path -ArgumentList '/uninstall' -Wait -WindowStyle Hidden -EA 0
+                Start-Process $path -ArgumentList '/uninstall' -Wait -WindowStyle Hidden -EA Stop
                 break
             }
         }
@@ -35,7 +36,7 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'OneDrive removal')) {
             "$env:PROGRAMDATA\Microsoft OneDrive",
             "$env:USERPROFILE\OneDrive"
         ) | ForEach-Object {
-            if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+            if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
         }
 
         # Clean OneDrive from all user profiles (skip profiles with active OneDrive files)
@@ -50,15 +51,24 @@ if (-not (Test-IrreversibleOperationAllowed -Name 'OneDrive removal')) {
                 "$($userProf.FullName)\AppData\Local\Microsoft\OneDrive",
                 "$($userProf.FullName)\OneDrive"
             ) | ForEach-Object {
-                if (Test-Path $_) { Remove-Item $_ -Recurse -Force -EA 0 }
+                if (Test-Path -LiteralPath $_) { Remove-Item -LiteralPath $_ -Recurse -Force -EA Stop }
             }
         }
 
         # Remove OneDrive from Explorer sidebar
-        reg delete "HKCR\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}" /f 2>$null
-        reg delete "HKCR\Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}" /f 2>$null
+        foreach ($sidebarKey in @(
+            'Registry::HKEY_CLASSES_ROOT\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}',
+            'Registry::HKEY_CLASSES_ROOT\Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}'
+        )) {
+            if (Test-Path -LiteralPath $sidebarKey) {
+                $regKey = $sidebarKey -replace '^Registry::HKEY_CLASSES_ROOT', 'HKCR'
+                reg delete $regKey /f 2>$null
+                if ($LASTEXITCODE -ne 0) { throw "reg.exe exited with code $LASTEXITCODE" }
+            }
+        }
     } else {
         Write-Log "  [DRY RUN] Would uninstall OneDrive, clean folders and registry" "INFO"
     }
+    }
 
-    Write-Log "  OneDrive removed" "SUCCESS"
+    if ($oneDriveResult) { Write-Log "  OneDrive removed" "SUCCESS" } else { Write-Log "  OneDrive removal failed" "ERROR" }

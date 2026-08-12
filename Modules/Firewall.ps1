@@ -86,5 +86,9 @@ if (-not $DryRun) {
 
     Write-Log "  Imported $successCount firewall rules" "SUCCESS"
 } else {
+    foreach ($rule in $rules) {
+        Register-OperationResult -Name $rule.Name -Action 'Replace firewall rule' -Scope 'Machine' -Status 'Planned'
+    }
+    Register-OperationResult -Name 'Domain,Private firewall profiles' -Action 'Enable firewall profiles' -Scope 'Machine' -Status 'Planned'
     Write-Log "  [DRY RUN] Would import $($rules.Count) firewall rules" "INFO"
 }

@@ -9,10 +9,7 @@
 if ($script:systemTweaksCoreSelected) {
 Write-Log "  Applying performance tweaks..." "INFO"
 
-if (-not $DryRun) {
-    powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
-    if (-not $script:isLaptop) { powercfg /hibernate off 2>$null }
-}
+# Power profile selection is performed only in the dedicated Power subphase.
 
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications" -Name "GlobalUserDisabled" -Value 1
 Set-Reg -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\AppPrivacy" -Name "LetAppsRunInBackground" -Value 2
@@ -56,15 +53,23 @@ Write-Log "  System tweaks applied" "SUCCESS"
 # ============================================================================
 if ($script:isSSD) {
     Write-Log "[SSD] Applying SSD optimizations..." "SECTION"
-    if (-not $DryRun) {
+    $allowFilesystemOptimization = Test-IrreversibleOperationAllowed -Name 'Filesystem optimization'
+    if ($allowFilesystemOptimization) {
+        Invoke-TrackedOperation -Name 'Filesystem optimization' -Action 'Configure TRIM and last-access settings' -Scope 'Machine' -Operation {
         $defragTask = Get-ScheduledTask -TaskName "ScheduledDefrag" -EA 0
         if ($defragTask) { Write-Log "  Configuring defrag for SSD optimization..." "INFO" }
         fsutil behavior set DisableDeleteNotify 0 | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "fsutil TRIM configuration exited with code $LASTEXITCODE" }
         Write-Log "  TRIM enabled" "INFO"
         fsutil behavior set disablelastaccess 1 | Out-Null
         Write-Log "  Last access timestamp disabled" "INFO"
-    } else {
+        if ($LASTEXITCODE -ne 0) { throw "fsutil exited with code $LASTEXITCODE" }
+        } | Out-Null
+    }
+    if ($DryRun) {
         Write-Log "  [DRY RUN] Would enable TRIM, disable last access timestamp" "INFO"
+    } elseif (-not $allowFilesystemOptimization) {
+        Write-Log "  Filesystem optimization skipped (explicit approval required)" "WARNING"
     }
     Disable-ServiceDryRun -ServiceName 'SysMain'
     Write-Log "  Superfetch disabled (not needed on SSD)" "INFO"
@@ -74,10 +79,13 @@ if ($script:isSSD) {
     Write-Log "  SSD optimizations applied" "SUCCESS"
 } else {
     Write-Log "[HDD] Keeping HDD-optimized settings..." "SECTION"
-    if (-not $DryRun) {
-        Set-Service -Name 'SysMain' -StartupType Automatic -EA 0
-        Start-Service -Name 'SysMain' -EA 0
-    }
+    Invoke-TrackedOperation -Name 'SysMain' -Action 'Enable HDD service optimization' -Scope 'Machine' -Operation {
+        Set-Service -Name 'SysMain' -StartupType Automatic -EA Stop
+        Start-Service -Name 'SysMain' -EA Stop
+    } -Verification {
+        (Get-Service -Name 'SysMain' -EA Stop).StartType.ToString() -eq 'Automatic'
+    } | Out-Null
+    if ($DryRun) { Write-Log "  [DRY RUN] Would enable Superfetch for HDD" "INFO" }
     Write-Log "  Superfetch enabled (improves HDD performance)" "INFO"
 }
 
@@ -95,6 +103,7 @@ $startupBloat = if ($script:configOverrides.ContainsKey('StartupBloat')) { $scri
 ) }
 
 if (-not $DryRun -and $allowStartupCleanup) {
+    Invoke-TrackedOperation -Name 'Startup item cleanup' -Action 'Remove selected startup entries and shortcuts' -Scope 'Mixed' -Operation {
     $runKey = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
     foreach ($item in $startupBloat) {
         Get-ItemProperty $runKey -EA 0 | ForEach-Object {
@@ -128,9 +137,11 @@ if (-not $DryRun -and $allowStartupCleanup) {
     }
     $startupFolder = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
     @('*Spotify*', '*Discord*', '*Steam*', '*Epic*', '*Adobe*', '*CCleaner*', '*Skype*', '*Dropbox*') | ForEach-Object {
-        Get-ChildItem $startupFolder -Filter $_ -EA 0 | Remove-Item -Force -EA 0
+        Get-ChildItem $startupFolder -Filter $_ -EA 0 | Remove-Item -Force -EA Stop
     }
+    } | Out-Null
 } elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Startup item cleanup' -Action 'Remove selected startup entries and shortcuts' -Scope 'Mixed' -Operation { } | Out-Null
     Write-Log "  [DRY RUN] Would clean startup registry keys and shortcuts" "INFO"
 } else {
     Write-Log "  Startup cleanup skipped (explicit approval required)" "WARNING"
@@ -146,12 +157,16 @@ if (-not $KeepDefender) {
         Write-Log "  WARNING: Tamper Protection is enabled -- exclusions may be silently rejected" "WARNING"
     }
     $defenderExclusions = if ($script:configOverrides.ContainsKey('DefenderExclusions')) { $script:configOverrides.DefenderExclusions } else { @() }
-    if (-not $DryRun) {
-        foreach ($path in $defenderExclusions) { Add-MpPreference -ExclusionPath $path -EA 0 }
+    if ($defenderExclusions.Count -gt 0) {
+        Invoke-TrackedOperation -Name 'Defender exclusions' -Action 'Add configured Defender exclusions' -Scope 'Machine' -Operation {
+            foreach ($path in $defenderExclusions) { Add-MpPreference -ExclusionPath $path -EA Stop }
+        } | Out-Null
+    } elseif ($DryRun) {
+        Register-OperationResult -Name 'Defender exclusions' -Action 'Add configured Defender exclusions' -Scope 'Machine' -Status 'Skipped' -ErrorMessage 'No exclusions configured'
     } else {
-        Write-Log "  [DRY RUN] Would add $($defenderExclusions.Count) Defender exclusions" "INFO"
+        Register-OperationResult -Name 'Defender exclusions' -Action 'Add configured Defender exclusions' -Scope 'Machine' -Status 'Skipped' -ErrorMessage 'No exclusions configured'
     }
-    Write-Log "  Defender exclusions added" "SUCCESS"
+    if ($defenderExclusions.Count -gt 0) { Write-Log "  Defender exclusions processed" "SUCCESS" }
 } else {
     Write-Log "[Defender] Skipped (-KeepDefender)" "SECTION"
 }
@@ -162,7 +177,11 @@ if (-not $KeepDefender) {
 # ============================================================================
 if (Test-SystemTweakEnabled 'Power') {
 Write-Log "[Power] Configuring power settings..." "SECTION"
+$allowPowerMutation = Test-IrreversibleOperationAllowed -Name 'Power profile mutation'
+$powerApplied = $false
 
+if ($allowPowerMutation) {
+    $powerApplied = Invoke-TrackedOperation -Name 'Power profile' -Action 'Configure hardware-aware power profile' -Scope 'Machine' -Operation {
 if (-not $DryRun) {
     if ($script:isLaptop) {
         Write-Log "  Applying LAPTOP power profile..." "INFO"
@@ -196,12 +215,21 @@ if (-not $DryRun) {
         powercfg /setacvalueindex SCHEME_CURRENT 238c9fa8-0aad-41ed-83f4-97be242c8f20 94ac6d29-73ce-41a6-809f-6363ba21b47e 0
     }
     powercfg /setactive SCHEME_CURRENT
-} else {
+    if ($LASTEXITCODE -ne 0) { throw "powercfg activation exited with code $LASTEXITCODE" }
+    powercfg /getactivescheme 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "powercfg verification exited with code $LASTEXITCODE" }
+}
+}
+}
+if ($DryRun) {
     Write-Log "  [DRY RUN] Would configure power settings for $(if ($script:isLaptop) { 'LAPTOP' } else { 'WORKSTATION' })" "INFO"
+} elseif (-not $allowPowerMutation) {
+    Write-Log "  Power profile mutation skipped (explicit approval required)" "WARNING"
+} elseif ($powerApplied) {
+    Write-Log "  Power profile configured" "SUCCESS"
 }
 
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power" -Name "HiberbootEnabled" -Value 0
-Write-Log "  Power settings configured" "SUCCESS"
 } else {
     Write-Log "[Power] SKIPPED (phase excluded)" "INFO"
 }
@@ -231,15 +259,24 @@ if ($disableNagle) {
     }
 }
 if ($enableNetworkDiscovery -or $enableFilePrinterSharing) {
-    if (-not $DryRun) {
-        if ($enableNetworkDiscovery) {
-            Set-NetFirewallRule -DisplayGroup 'Network Discovery' -Profile Domain,Private -Enabled True -EA 0
-        }
-        if ($enableFilePrinterSharing) {
-            Set-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -Profile Domain,Private -Enabled True -EA 0
-        }
+    $allowNetworkFirewall = Test-IrreversibleOperationAllowed -Name 'Network firewall hardening'
+    if ($allowNetworkFirewall) {
+        Invoke-TrackedOperation -Name 'Network firewall hardening' -Action 'Enable configured Domain/Private firewall rule groups' -Scope 'Machine' -Operation {
+            if ($enableNetworkDiscovery) {
+                Set-NetFirewallRule -DisplayGroup 'Network Discovery' -Profile Domain,Private -Enabled True -EA Stop
+            }
+            if ($enableFilePrinterSharing) {
+                Set-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -Profile Domain,Private -Enabled True -EA Stop
+            }
+        } -Verification {
+            $enabledRules = @()
+            if ($enableNetworkDiscovery) { $enabledRules += @(Get-NetFirewallRule -DisplayGroup 'Network Discovery' -Profile Domain,Private -EA Stop) }
+            if ($enableFilePrinterSharing) { $enabledRules += @(Get-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -Profile Domain,Private -EA Stop) }
+            @($enabledRules | Where-Object { -not $_.Enabled }).Count -eq 0
+        } | Out-Null
+        if ($DryRun) { Write-Log "  [DRY RUN] Would enable explicitly configured sharing rules on Domain/Private profiles only" "INFO" }
     } else {
-        Write-Log "  [DRY RUN] Would enable explicitly configured sharing rules on Domain/Private profiles only" "INFO"
+        Write-Log "  Network firewall hardening skipped (explicit approval required)" "WARNING"
     }
 }
 if (-not $disableNagle -and -not $enableNetworkDiscovery -and -not $enableFilePrinterSharing) {

@@ -8,12 +8,15 @@ Write-Rationale 'Edge'
 
 # Close Edge first
 if (-not $DryRun) {
-    Stop-Process -Name 'msedge' -Force -EA 0
+    Invoke-TrackedOperation -Name 'Close Edge' -Action 'Stop Edge before policy and bookmark changes' -Scope 'CurrentUser' -Operation {
+        Get-Process -Name 'msedge' -EA 0 | Stop-Process -Force -EA Stop
+    } | Out-Null
     Start-Sleep -Seconds 2
+} else {
+    Invoke-TrackedOperation -Name 'Close Edge' -Action 'Stop Edge before policy and bookmark changes' -Scope 'CurrentUser' -Operation { } | Out-Null
 }
 
 $edgePolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
-if (!(Test-Path $edgePolicyPath)) { New-Item -Path $edgePolicyPath -Force | Out-Null }
 
 # Edge Telemetry & Data Collection
 Write-Log "  Disabling Edge telemetry..." "INFO"
@@ -99,13 +102,11 @@ Set-Reg -Path $edgePolicyPath -Name "DefaultSearchProviderSuggestURL" -Value "ht
 
 # Startup URLs
 $startupUrlsPath = "$edgePolicyPath\RestoreOnStartupURLs"
-if (!(Test-Path $startupUrlsPath)) { New-Item -Path $startupUrlsPath -Force | Out-Null }
 Set-Reg -Path $startupUrlsPath -Name "1" -Value "https://www.google.com" -Type "String"
 
 # Force install uBlock Origin
 Write-Log "  Installing uBlock Origin..." "INFO"
 $forcelistPath = "$edgePolicyPath\ExtensionInstallForcelist"
-if (!(Test-Path $forcelistPath)) { New-Item -Path $forcelistPath -Force | Out-Null }
 Set-Reg -Path $forcelistPath -Name "1" -Value "odfafepnkmbhccpbejgmiehpchacaeak;https://edge.microsoft.com/extensionwebstorebase/v1/crx" -Type "String"
 
 # Configure Edge bookmarks (default: Google only; use -ConfigPath to add vendor links)
@@ -123,11 +124,11 @@ if (-not $DryRun -and $allowBookmarkCleanup) {
 
         if (Test-Path $edgePath) {
             # Launch Edge to create profile
-            Start-Process $edgePath -ArgumentList "--no-first-run" -EA 0
+            Start-Process $edgePath -ArgumentList "--no-first-run" -EA Stop
             Start-Sleep -Seconds 5
 
             # Close Edge
-            Stop-Process -Name 'msedge' -Force -EA 0
+            Get-Process -Name 'msedge' -EA 0 | Stop-Process -Force -EA Stop
             Start-Sleep -Seconds 2
         }
     }
@@ -137,6 +138,8 @@ if (-not $DryRun -and $allowBookmarkCleanup) {
         foreach ($userProf in $edgeProfiles) {
             $bookmarksFile = Join-Path $userProf.FullName "Bookmarks"
             if (Test-Path $bookmarksFile) {
+                $bookmarkPath = $bookmarksFile
+                Invoke-TrackedOperation -Name "Edge bookmarks: $($userProf.Name)" -Action 'Update Edge bookmark file' -Scope 'CurrentUser' -Operation {
                 try {
                     $content = Get-Content $bookmarksFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
@@ -192,15 +195,18 @@ if (-not $DryRun -and $allowBookmarkCleanup) {
                         $content.roots.bookmark_bar.children = @($newBookmarks) + @($content.roots.bookmark_bar.children)
                         $content.checksum = ""
                         $json = $content | ConvertTo-Json -Depth 100
-                        [System.IO.File]::WriteAllText($bookmarksFile, $json, [System.Text.Encoding]::UTF8)
+                        [System.IO.File]::WriteAllText($bookmarkPath, $json, [System.Text.Encoding]::UTF8)
                     }
                 } catch {
-                    Write-Log "  Failed to configure bookmarks for $($userProf.Name): $_" "ERROR"
+                    throw "Failed to configure bookmarks for $($userProf.Name): $($_.Exception.Message)"
                 }
+                } | Out-Null
             }
         }
     }
-} elseif (-not $DryRun) {
+} elseif ($DryRun) {
+    Invoke-TrackedOperation -Name 'Edge bookmark file update' -Action 'Update Edge bookmark files' -Scope 'CurrentUser' -Operation { } | Out-Null
+} else {
     Write-Log "  Edge bookmark file update skipped (explicit approval required)" "WARNING"
 }
 
