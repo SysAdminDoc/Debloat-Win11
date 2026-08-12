@@ -31,6 +31,7 @@ param(
     [switch]$CheckDrift,
     [switch]$AllUsers,
     [switch]$UpdateApps,
+    [switch]$AllowUnsupportedPlatform,
     [switch]$AllowIrreversibleChanges
 )
 
@@ -54,6 +55,10 @@ try {
 }
 if ($script:policyCatalog.SchemaVersion -ne 1 -or [string]::IsNullOrWhiteSpace([string]$script:policyCatalog.CatalogVersion)) {
     Write-Host "ERROR: Policy catalog schema/version is unsupported: $($script:policyCatalog.SchemaVersion)/$($script:policyCatalog.CatalogVersion)" -ForegroundColor Red
+    exit 2
+}
+if (@($script:policyCatalog.RuntimeMatrix).Count -eq 0) {
+    Write-Host 'ERROR: Policy catalog has no supported runtime matrix' -ForegroundColor Red
     exit 2
 }
 $script:profileHelperFile = Join-Path $PSScriptRoot 'tools\ProfileHive.ps1'
@@ -94,6 +99,14 @@ foreach ($action in $script:actionCatalog) {
     if ($action.DefaultEnabled -isnot [bool] -or $action.RequiresApproval -isnot [bool]) { $catalogErrors.Add("Action $($action.Name) requires boolean DefaultEnabled and RequiresApproval metadata") | Out-Null }
     if ([string]::IsNullOrWhiteSpace([string]$action.Rollback)) { $catalogErrors.Add("Action $($action.Name) requires Rollback metadata") | Out-Null }
 }
+$runtimeMatrixErrors = [System.Collections.ArrayList]@()
+foreach ($runtime in @($script:policyCatalog.RuntimeMatrix)) {
+    if ([string]::IsNullOrWhiteSpace([string]$runtime.Name) -or [int]$runtime.MinimumBuild -lt 1 -or @($runtime.SupportedEditions).Count -eq 0 -or @($runtime.SupportedArchitectures).Count -eq 0) {
+        $runtimeMatrixErrors.Add('Every runtime matrix entry requires Name, positive MinimumBuild, SupportedEditions, and SupportedArchitectures') | Out-Null
+    }
+}
+$runtimeNames = @($script:policyCatalog.RuntimeMatrix | ForEach-Object Name | Group-Object | Where-Object Count -gt 1)
+if ($runtimeNames.Count -gt 0) { $runtimeMatrixErrors.Add('Runtime matrix names must be unique') | Out-Null }
 $actionPhaseDuplicates = $script:actionCatalog | ForEach-Object Phase | Group-Object | Where-Object Count -gt 1
 foreach ($duplicate in $actionPhaseDuplicates) { $catalogErrors.Add("Duplicate action metadata phase '$($duplicate.Name)'") | Out-Null }
 $expectedActionPhases = @('AppX','OEM','OneDrive','Office','Edge','Firewall','Privacy','Services','SystemTweaks','Power','Network','StartMenu','Updates')
@@ -105,6 +118,11 @@ foreach ($duplicate in $duplicatePolicies) { $catalogErrors.Add("Duplicate polic
 if ($catalogErrors.Count -gt 0) {
     Write-Host "ERROR: Policy catalog validation failed:" -ForegroundColor Red
     $catalogErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 2
+}
+if ($runtimeMatrixErrors.Count -gt 0) {
+    Write-Host 'ERROR: Runtime matrix validation failed:' -ForegroundColor Red
+    $runtimeMatrixErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
     exit 2
 }
 
@@ -1202,6 +1220,9 @@ $script:manifest = @{
         edition = $null
         architecture = $null
         supported = $null
+        support_matrix = $null
+        override = $false
+        override_reason = $null
     }
     safety    = [ordered]@{
         irreversible_changes_allowed = $AllowIrreversibleChanges.IsPresent
@@ -1652,15 +1673,28 @@ $architecture = switch -Regex ($architecture.ToLowerInvariant()) {
 $script:manifest.runtime.os_build = $osBuildNumber
 $script:manifest.runtime.edition = [string]$editionId
 $script:manifest.runtime.architecture = $architecture
-$script:manifest.runtime.supported = $true
+$runtimeDefinition = @($script:policyCatalog.RuntimeMatrix | Where-Object { $_.Name -eq 'WindowsClient' }) | Select-Object -First 1
+$runtimeSupportReasons = [System.Collections.ArrayList]@()
+if (-not $runtimeDefinition) {
+    $runtimeSupportReasons.Add('catalog has no WindowsClient runtime definition') | Out-Null
+} else {
+    $script:manifest.runtime.support_matrix = [string]$runtimeDefinition.Name
+    if ($osBuildNumber -lt [int]$runtimeDefinition.MinimumBuild) { $runtimeSupportReasons.Add("build $osBuildNumber is below supported minimum $($runtimeDefinition.MinimumBuild)") | Out-Null }
+    if (@($runtimeDefinition.SupportedEditions) -notcontains [string]$editionId) { $runtimeSupportReasons.Add("edition $editionId is not in the supported runtime matrix") | Out-Null }
+    if (@($runtimeDefinition.SupportedArchitectures) -notcontains $architecture) { $runtimeSupportReasons.Add("architecture $architecture is not in the supported runtime matrix") | Out-Null }
+}
+$runtimeSupported = $runtimeSupportReasons.Count -eq 0
+$script:manifest.runtime.supported = $runtimeSupported
 $supportErrors = [System.Collections.ArrayList]@()
 foreach ($action in $script:actionCatalog) {
     $selected = Test-PhaseEnabled -Phase $action.Phase
-    $editionSupported = @($action.SupportedEditions) -contains 'AnyClient' -or @($action.SupportedEditions) -contains $editionId
+    $editionSupported = (@($action.SupportedEditions) -contains 'AnyClient' -and $runtimeDefinition -and @($runtimeDefinition.SupportedEditions) -contains [string]$editionId) -or @($action.SupportedEditions) -contains $editionId
     $architectureSupported = @($action.SupportedArchitectures) -contains $architecture
-    $buildSupported = $osBuildNumber -ge [int]$action.SupportedBuildMin
-    $supported = $buildSupported -and $editionSupported -and $architectureSupported
-    $reason = if (-not $buildSupported) { "build $osBuildNumber is below $($action.SupportedBuildMin)" } elseif (-not $editionSupported) { "edition $editionId is not supported" } elseif (-not $architectureSupported) { "architecture $architecture is not supported" } else { $null }
+    $effectiveBuildMin = [int]$action.SupportedBuildMin
+    if ($runtimeDefinition -and [int]$runtimeDefinition.MinimumBuild -gt $effectiveBuildMin) { $effectiveBuildMin = [int]$runtimeDefinition.MinimumBuild }
+    $buildSupported = $osBuildNumber -ge $effectiveBuildMin
+    $supported = $runtimeSupported -and $buildSupported -and $editionSupported -and $architectureSupported
+    $reason = if (-not $runtimeSupported) { $runtimeSupportReasons -join '; ' } elseif (-not $buildSupported) { "build $osBuildNumber is below $effectiveBuildMin" } elseif (-not $editionSupported) { "edition $editionId is not supported" } elseif (-not $architectureSupported) { "architecture $architecture is not supported" } else { $null }
     $script:manifest.action_plan.Add([ordered]@{
         name = $action.Name
         phase = $action.Phase
@@ -1672,18 +1706,26 @@ foreach ($action in $script:actionCatalog) {
         dependencies = @($action.Dependencies)
         rollback = $action.Rollback
         requires_approval = [bool]$action.RequiresApproval
-        supported_build_min = [int]$action.SupportedBuildMin
+        supported_build_min = $effectiveBuildMin
         supported_editions = @($action.SupportedEditions)
         supported_architectures = @($action.SupportedArchitectures)
         reason = $reason
     }) | Out-Null
     if ($selected -and -not $supported) { $supportErrors.Add("$($action.Name): $reason") | Out-Null }
 }
+$script:manifest.runtime.override = $false
 if ($supportErrors.Count -gt 0) {
     $script:manifest.runtime.supported = $false
-    Write-Log 'ERROR: Selected actions are outside the supported build/edition/architecture matrix:' 'ERROR'
-    $supportErrors | ForEach-Object { Write-Log "  $_" 'ERROR' }
-    exit 2
+    $script:manifest.runtime.override_reason = $supportErrors -join '; '
+    if (-not $AllowUnsupportedPlatform) {
+        Write-Log 'ERROR: Selected actions are outside the supported build/edition/architecture matrix:' 'ERROR'
+        $supportErrors | ForEach-Object { Write-Log "  $_" 'ERROR' }
+        Write-Log 'Use -AllowUnsupportedPlatform only for an explicit, noncompliant override.' 'ERROR'
+        exit 2
+    }
+    $script:manifest.runtime.override = $true
+    Write-Log 'WARNING: Unsupported platform override accepted; this run will remain noncompliant.' 'WARNING'
+    $supportErrors | ForEach-Object { Write-Log "  OVERRIDE: $_" 'WARNING' }
 }
 
 # ============================================================================

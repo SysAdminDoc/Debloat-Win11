@@ -4,6 +4,10 @@
     SchemaVersion = 1
     CatalogVersion = '1.0'
 
+    RuntimeMatrix = @(
+        @{ Name = 'WindowsClient'; MinimumBuild = 18362; SupportedEditions = @('Core','CoreN','CoreCountrySpecific','CoreSingleLanguage','Professional','ProfessionalN','ProfessionalEducation','ProfessionalWorkstation','Enterprise','EnterpriseN','EnterpriseG','EnterpriseGN','EnterpriseS','EnterpriseSN','Education','EducationN','IoTEnterprise','IoTEnterpriseS','ServerRdsh'); SupportedArchitectures = @('x86','x64','arm64') }
+    )
+
     Policies = @(
         @{ Scope = 'Device'; Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAIDataAnalysis'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
         @{ Scope = 'User'; Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableAIDataAnalysis'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }

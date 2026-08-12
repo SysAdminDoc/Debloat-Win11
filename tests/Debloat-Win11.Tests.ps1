@@ -1127,6 +1127,16 @@ Describe 'Policy Catalog Contract' {
             $action.RequiresApproval | Should -BeOfType [bool]
         }
     }
+
+    It 'defines a catalog-owned client runtime matrix' {
+        $runtime = @($catalog.RuntimeMatrix | Where-Object Name -eq 'WindowsClient')
+        $runtime.Count | Should -Be 1
+        $runtime[0].MinimumBuild | Should -Be 18362
+        $runtime[0].SupportedEditions | Should -Contain 'Professional'
+        $runtime[0].SupportedEditions | Should -Contain 'Enterprise'
+        $runtime[0].SupportedArchitectures | Should -Contain 'x64'
+        $runtime[0].SupportedArchitectures | Should -Contain 'arm64'
+    }
 }
 
 Describe 'Action Plan and Support Matrix' {
@@ -1136,6 +1146,10 @@ Describe 'Action Plan and Support Matrix' {
         $scriptContent | Should -Match 'supportErrors'
         $scriptContent | Should -Match 'build.*edition.*architecture'
         $scriptContent | Should -Match 'Write-ActionPlan'
+        $scriptContent | Should -Match 'AllowUnsupportedPlatform'
+        $scriptContent | Should -Match 'runtime\.override'
+        $scriptContent | Should -Match 'RuntimeMatrix'
+        $scriptContent | Should -Match 'noncompliant override'
     }
 }
 

@@ -68,6 +68,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Intune detection accepts only a schema-valid manifest with matching policy/config hashes, target scope, supported runtime, zero failed operations, and a matching complete registry stamp; `-OutputFormat Json` emits stable compliance reasons.
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
 - The policy catalog also carries per-phase risk, scope, prerequisites, rollback, and supported build/edition/architecture metadata; selected unsupported actions fail before mutation.
+- The catalog also owns the runtime matrix: Windows 10 build 18362 (1903) or later, supported client EditionID values, and x86/x64/arm64. Unsupported targets fail before mutation; `-AllowUnsupportedPlatform` is an explicit override that marks the manifest unsupported and therefore noncompliant.
 - WinGet updates are opt-in and limited to exact `PackageUpdates` entries in the configuration; restore accepts an exact package ID with optional `-RestoreSource` and `-RestoreVersion`, then writes a JSON before/after report.
 - Each run emits correlation-linked JSON summary and manifest artifacts, includes every tracked/package operation and rollback limitation, retains only the newest 50 artifacts per type, and supports `-OutputFormat Text|Json|Csv` for noninteractive callers.
 - `Detect-Debloat.ps1`, `Detect-Drift.ps1`, `Remediate-Drift.ps1`, and `Debloat-Win11-Maintain.ps1` share the same `-OutputFormat Text|Json|Csv` contract; JSON includes a schema/status/summary object and non-success states return exit 1.
@@ -256,6 +257,16 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 | **Privileges** | Administrator required |
 | **Disk Space** | 5 GB free recommended |
 | **Network** | Not required |
+
+Supported runtime matrix:
+
+| Target | Supported values |
+|--------|------------------|
+| Build | Windows client build 18362+ (Windows 10 1903+; Windows 11 21H2 and later) |
+| Edition | Core, Professional, Enterprise, Education, IoT Enterprise, supported N/Workstation/LTSC variants in `Modules\PolicyCatalog.psd1` |
+| Architecture | x86, x64, arm64 |
+
+The matrix is data-driven and recorded in each manifest. Use `-AllowUnsupportedPlatform` only for a deliberately unsupported test run; the override is logged and cannot pass compliance detection.
 
 ---
 
