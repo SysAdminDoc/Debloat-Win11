@@ -558,129 +558,350 @@ if ($ConfigPath) {
     }
 }
 
+# WIM helpers are defined before the WIM branch so every native DISM/registry
+# operation has checked status and the report can describe partial failures.
+function Add-WimReportOperation {
+    param([string]$Name, [string]$Status, [string]$Detail)
+    if ($script:wimReport) {
+        $script:wimReport.operations += [ordered]@{
+            name = $Name
+            status = $Status
+            detail = $Detail
+        }
+    }
+}
+
+function Open-WimRegistryHive {
+    param([Parameter(Mandatory)][string]$HiveName, [Parameter(Mandatory)][string]$HiveFile)
+
+    & reg load $HiveName $HiveFile 2>$null | Out-Null
+    $loadExitCode = $LASTEXITCODE
+    if ($loadExitCode -ne 0) {
+        Add-WimReportOperation -Name "Load $HiveName" -Status 'Failed' -Detail "reg load exit code $loadExitCode"
+        throw "Could not load offline hive $HiveFile (reg load exit code $loadExitCode)"
+    }
+    $registryPath = "Registry::HKEY_USERS\$($HiveName -replace '^HKU\\','')"
+    if (-not (Test-Path $registryPath)) {
+        Add-WimReportOperation -Name "Load $HiveName" -Status 'Failed' -Detail 'Hive path was not available after reg load'
+        throw "Offline hive $HiveName was not available after loading"
+    }
+    Add-WimReportOperation -Name "Load $HiveName" -Status 'Succeeded' -Detail $HiveFile
+    return [pscustomobject]@{ HiveName = $HiveName; RegistryPath = $registryPath; Loaded = $true }
+}
+
+function Close-WimRegistryHive {
+    param([Parameter(Mandatory)][psobject]$Session)
+
+    [gc]::Collect()
+    Start-Sleep -Milliseconds 500
+    & reg unload $Session.HiveName 2>$null | Out-Null
+    $unloadExitCode = $LASTEXITCODE
+    if ($unloadExitCode -ne 0) {
+        Add-WimReportOperation -Name "Unload $($Session.HiveName)" -Status 'Failed' -Detail "reg unload exit code $unloadExitCode"
+        throw "Could not unload offline hive $($Session.HiveName) (reg unload exit code $unloadExitCode)"
+    }
+    $Session.Loaded = $false
+    Add-WimReportOperation -Name "Unload $($Session.HiveName)" -Status 'Succeeded' -Detail $null
+}
+
+function Set-WimRegistryValue {
+    param(
+        [Parameter(Mandatory)][string]$HiveRoot,
+        [Parameter(Mandatory)][string]$RelativePath,
+        [Parameter(Mandatory)][string]$Name,
+        $Value,
+        [string]$Type = 'DWord'
+    )
+
+    $registryPath = "Registry::HKEY_USERS\$HiveRoot\$RelativePath"
+    Set-DebloatRegistryProperty -Path $registryPath -Name $Name -Value $Value -Type $Type -ErrorAction Stop
+    $current = Get-ItemProperty -Path $registryPath -Name $Name -ErrorAction Stop
+    if ($null -eq $current -or $current.$Name -ne $Value) {
+        throw "Offline registry verification failed for $HiveRoot\$RelativePath\$Name"
+    }
+    $script:wimReport.registry_values_applied++
+}
+
 # ============================================================================
 # WIM IMAGE MODE - Offline debloat of a mounted Windows image
 # ============================================================================
 if ($WimPath) {
-    if (!(Test-Path $WimPath)) {
-        Write-Host "ERROR: WIM file not found: $WimPath" -ForegroundColor Red
+    $wimReportFile = $null
+    $wimReport = [ordered]@{
+        schema_version = 1
+        mode = 'WIM'
+        image_path = $WimPath
+        image_index = $WimIndex
+        mount_path = $MountDir
+        catalog_version = [string]$script:policyCatalog.CatalogVersion
+        image_name = $null
+        image_version = $null
+        host_build = [Environment]::OSVersion.Version.Build
+        status = 'ValidationFailed'
+        commit_status = 'NotStarted'
+        packages_removed = 0
+        registry_values_applied = 0
+        operations = @()
+    }
+    $script:wimReport = $wimReport
+    $wimFailure = $null
+    $wimMounted = $false
+    $wimSave = $false
+    $wimCommitRequested = $false
+    $defaultHiveLoaded = $false
+    $softwareHiveLoaded = $false
+    $defaultHiveSession = $null
+    $softwareHiveSession = $null
+    $removed = 0
+
+    function Write-WimReport {
+        if (-not $wimReportFile) { return }
+        try {
+            $script:wimReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $wimReportFile -Encoding UTF8
+        } catch {
+            Write-Host "WARNING: Could not write WIM report: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+
+    try {
+        if (!(Test-Path -LiteralPath $WimPath -PathType Leaf)) {
+            throw "WIM file not found: $WimPath"
+        }
+        if ($WimIndex -lt 1) { throw "WIM index must be 1 or greater" }
+        if ([string]::IsNullOrWhiteSpace($MountDir)) { throw 'Mount directory cannot be empty' }
+        $resolvedWimPath = (Resolve-Path -LiteralPath $WimPath -ErrorAction Stop).Path
+        $resolvedMountDir = [System.IO.Path]::GetFullPath($MountDir)
+        $mountRoot = [System.IO.Path]::GetPathRoot($resolvedMountDir)
+        if ($resolvedMountDir.TrimEnd('\') -ieq $mountRoot.TrimEnd('\')) { throw "Mount directory cannot be a drive root: $resolvedMountDir" }
+        $wimReport.image_path = $resolvedWimPath
+        $wimReport.mount_path = $resolvedMountDir
+
+        foreach ($requiredCommand in @('Get-WindowsImage','Mount-WindowsImage','Dismount-WindowsImage','Get-AppxProvisionedPackage','Remove-AppxProvisionedPackage')) {
+            if (-not (Get-Command $requiredCommand -ErrorAction SilentlyContinue)) {
+                throw "Required DISM command is unavailable: $requiredCommand"
+            }
+        }
+        $imageInfo = @(Get-WindowsImage -ImagePath $resolvedWimPath -Index $WimIndex -ErrorAction Stop)
+        if ($imageInfo.Count -ne 1) { throw "WIM index $WimIndex was not found in $resolvedWimPath" }
+        $wimReport.image_name = [string]$imageInfo[0].ImageName
+        $wimReport.image_version = [string]$imageInfo[0].Version
+        if (-not [Environment]::Is64BitOperatingSystem -and [string]$imageInfo[0].Architecture -match '64') {
+            throw 'The selected image architecture requires a 64-bit host'
+        }
+        $mountedImages = @(Get-WindowsImage -Mounted -ErrorAction Stop | Where-Object { ([string]$_.MountDir).TrimEnd('\') -ieq $resolvedMountDir.TrimEnd('\') })
+        if ($mountedImages.Count -gt 0) { throw "Mount directory is already registered with DISM: $resolvedMountDir" }
+        if (Test-Path -LiteralPath $resolvedMountDir -PathType Leaf) { throw "Mount path is a file: $resolvedMountDir" }
+        if (-not (Test-Path -LiteralPath $resolvedMountDir)) {
+            New-Item -Path $resolvedMountDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        } elseif (@(Get-ChildItem -LiteralPath $resolvedMountDir -Force -ErrorAction Stop).Count -gt 0) {
+            throw "Mount directory must be empty before mounting: $resolvedMountDir"
+        }
+        New-Item -Path $LogDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+        $wimReportFile = Join-Path $LogDir ("Debloat-WIM-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+
+        Write-Host "=== WIM IMAGE MODE ===" -ForegroundColor Yellow
+        Write-Host "  Image: $resolvedWimPath (Index $WimIndex)" -ForegroundColor Cyan
+        Write-Host "  Image name: $($wimReport.image_name)" -ForegroundColor Cyan
+        Write-Host "  Mount: $resolvedMountDir" -ForegroundColor Cyan
+        Write-Host "  Catalog: $($wimReport.catalog_version)" -ForegroundColor Cyan
+
+        if (-not $DryRun -and -not $AllowIrreversibleChanges) {
+            $wimReport.status = 'Blocked'
+            $wimReport.commit_status = 'NotAuthorized'
+            Write-Host "ERROR: WIM changes require -AllowIrreversibleChanges (use -DryRun to preview)" -ForegroundColor Red
+            Write-WimReport
+            exit 2
+        }
+        if ($DryRun) {
+            $wimReport.status = 'Planned'
+            $wimReport.commit_status = 'NotRequested'
+            $removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { @($script:configOverrides.RemovePatterns) } else { @($script:defaultRemovePatterns) }
+            Write-Host "  [DRY RUN] Would remove provisioned packages matching $($removePatterns.Count) configured patterns" -ForegroundColor Gray
+            Write-Host "  [DRY RUN] Would apply $(@(Get-DebloatUserRegistryChecks -Policies $script:windowsAiPolicies -Tweaks $script:hkcuTweaks).Count) user catalog values and device policy catalog values" -ForegroundColor Gray
+            Write-WimReport
+            exit 0
+        }
+    } catch {
+        $wimFailure = $_.Exception.Message
+        $wimReport.status = 'ValidationFailed'
+        $wimReport.commit_status = 'NotStarted'
+        Write-Host "ERROR: WIM validation failed: $wimFailure" -ForegroundColor Red
+        Write-WimReport
         exit 2
     }
 
-    Write-Host "=== WIM IMAGE MODE ===" -ForegroundColor Yellow
-    Write-Host "  Image: $WimPath (Index $WimIndex)" -ForegroundColor Cyan
-    Write-Host "  Mount: $MountDir" -ForegroundColor Cyan
-
-    if (!(Test-Path $MountDir)) { New-Item -Path $MountDir -ItemType Directory -Force | Out-Null }
-
-    $wimMounted = $false
-    $wimSave = $false
-    $defaultHiveLoaded = $false
-    $softwareHiveLoaded = $false
-    $removed = 0
-
     try {
     Write-Host "`n  Mounting image..." -ForegroundColor Gray
-    $mountResult = Mount-WindowsImage -ImagePath $WimPath -Index $WimIndex -Path $MountDir -EA Stop
+    $mountResult = Mount-WindowsImage -ImagePath $resolvedWimPath -Index $WimIndex -Path $resolvedMountDir -EA Stop
     if (-not $mountResult) {
         throw "Failed to mount WIM image"
     }
     $wimMounted = $true
+    $script:wimReport.status = 'Mounted'
+    Add-WimReportOperation -Name 'Mount image' -Status 'Succeeded' -Detail "index=$WimIndex"
     Write-Host "  Mounted successfully" -ForegroundColor Green
 
     # Remove provisioned AppX packages from the offline image
     Write-Host "`n  Removing provisioned AppX packages..." -ForegroundColor Gray
-    $provPkgs = Get-AppxProvisionedPackage -Path $MountDir -EA Stop
-    $removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { $script:configOverrides.RemovePatterns } else { $script:defaultRemovePatterns }
+    $provPkgs = @(Get-AppxProvisionedPackage -Path $resolvedMountDir -ErrorAction Stop)
+    $removePatterns = if ($script:configOverrides.ContainsKey('RemovePatterns')) { @($script:configOverrides.RemovePatterns) } else { @($script:defaultRemovePatterns) }
     foreach ($pkg in $provPkgs) {
         foreach ($pattern in $removePatterns) {
             if ($pkg.DisplayName -like $pattern -or $pkg.PackageName -like $pattern) {
-                Remove-AppxProvisionedPackage -Path $MountDir -PackageName $pkg.PackageName -EA Stop | Out-Null
+                Remove-AppxProvisionedPackage -Path $resolvedMountDir -PackageName $pkg.PackageName -ErrorAction Stop | Out-Null
                 Write-Host "    Removed: $($pkg.DisplayName)" -ForegroundColor DarkGray
                 $removed++
                 break
             }
         }
     }
+    $remainingPackages = @(Get-AppxProvisionedPackage -Path $resolvedMountDir -ErrorAction Stop)
+    foreach ($remaining in $remainingPackages) {
+        if (@($removePatterns | Where-Object { $remaining.DisplayName -like $_ -or $remaining.PackageName -like $_ }).Count -gt 0) {
+            throw "Provisioned package remained after removal: $($remaining.PackageName)"
+        }
+    }
+    $script:wimReport.packages_removed = $removed
+    Add-WimReportOperation -Name 'Remove provisioned packages' -Status 'Succeeded' -Detail "removed=$removed"
     Write-Host "  Removed $removed provisioned packages" -ForegroundColor Green
 
-    # Apply registry tweaks to the offline Default user hive
-    Write-Host "`n  Applying offline registry tweaks..." -ForegroundColor Gray
-    $offlineHive = "$MountDir\Users\Default\NTUSER.DAT"
-    if (Test-Path $offlineHive) {
-        $hiveName = "HKU\OfflineWIM"
-        reg load $hiveName $offlineHive 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $defaultHiveLoaded = $true
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo" /v Enabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v SilentInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v ContentDeliveryAllowed /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v OemPreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v PreInstalledAppsEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" /v FeatureManagementEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v HideFileExt /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v Hidden /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarAl /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarDa /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" /v TaskbarMn /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" /v BingSearchEnabled /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v AppsUseLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v SystemUsesLightTheme /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$hiveName\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            [gc]::Collect()
-            Start-Sleep -Milliseconds 500
-            reg unload $hiveName 2>$null
-            $defaultHiveLoaded = $false
-            Write-Host "  Default user hive configured" -ForegroundColor Green
+    # Apply the shared user catalog to the offline Default user hive.
+    Write-Host "`n  Applying offline Default user registry catalog..." -ForegroundColor Gray
+    $offlineHive = "$resolvedMountDir\Users\Default\NTUSER.DAT"
+    if (-not (Test-Path $offlineHive)) { throw "Offline Default user hive not found: $offlineHive" }
+    $defaultHiveSession = Open-WimRegistryHive -HiveName 'HKU\OfflineWIM' -HiveFile $offlineHive
+    try {
+        $defaultHiveLoaded = $true
+        $userChecks = @(Get-DebloatUserRegistryChecks -Policies $script:windowsAiPolicies -Tweaks $script:hkcuTweaks)
+        foreach ($check in $userChecks) {
+            Set-WimRegistryValue -HiveRoot 'OfflineWIM' -RelativePath $check.Path -Name $check.Name -Value $check.Expected -Type $check.Type
         }
-    }
-
-    # Apply HKLM tweaks to the offline SOFTWARE hive
-    $offlineSW = "$MountDir\Windows\System32\config\SOFTWARE"
-    if (Test-Path $offlineSW) {
-        $swHive = "HKU\OfflineSW"
-        reg load $swHive $offlineSW 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $softwareHiveLoaded = $true
-            reg add "$swHive\Policies\Microsoft\Windows\DataCollection" /v AllowTelemetry /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\CloudContent" /v DisableWindowsConsumerFeatures /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\WindowsCopilot" /v TurnOffWindowsCopilot /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v DisableAIDataAnalysis /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\WindowsAI" /v AllowRecallEnablement /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Windows\OOBE" /v DisablePrivacyExperience /t REG_DWORD /d 1 /f 2>$null | Out-Null
-            reg add "$swHive\Policies\Microsoft\Dsh" /v AllowNewsAndInterests /t REG_DWORD /d 0 /f 2>$null | Out-Null
-            [gc]::Collect()
-            Start-Sleep -Milliseconds 500
-            reg unload $swHive 2>$null
-            $softwareHiveLoaded = $false
-            Write-Host "  System policies configured" -ForegroundColor Green
-        }
-    }
-
-    $wimSave = $true
-    } catch {
-        Write-Host "ERROR: WIM mode failed: $_" -ForegroundColor Red
-        $wimSave = $false
+        Add-WimReportOperation -Name 'Apply user policy catalog' -Status 'Succeeded' -Detail "values=$($userChecks.Count)"
     } finally {
-        if ($defaultHiveLoaded) {
-            reg unload "HKU\OfflineWIM" 2>$null
+        if ($defaultHiveSession -and $defaultHiveSession.Loaded) {
+            Close-WimRegistryHive -Session $defaultHiveSession
             $defaultHiveLoaded = $false
+            $defaultHiveSession = $null
         }
-        if ($softwareHiveLoaded) {
-            reg unload "HKU\OfflineSW" 2>$null
+    }
+    Write-Host "  Default user catalog configured" -ForegroundColor Green
+
+    # Apply baseline and catalog device policies to the offline SOFTWARE hive.
+    $offlineSW = "$resolvedMountDir\Windows\System32\config\SOFTWARE"
+    if (-not (Test-Path $offlineSW)) { throw "Offline SOFTWARE hive not found: $offlineSW" }
+    $softwareHiveSession = Open-WimRegistryHive -HiveName 'HKU\OfflineSW' -HiveFile $offlineSW
+    try {
+        $softwareHiveLoaded = $true
+        $deviceChecks = @(
+            @{ Path = 'Policies\Microsoft\Windows\DataCollection'; Name = 'AllowTelemetry'; Value = 0; Type = 'DWord' }
+            @{ Path = 'Policies\Microsoft\Windows\CloudContent'; Name = 'DisableWindowsConsumerFeatures'; Value = 1; Type = 'DWord' }
+            @{ Path = 'Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Value = 1; Type = 'DWord' }
+            @{ Path = 'Policies\Microsoft\Windows\OOBE'; Name = 'DisablePrivacyExperience'; Value = 1; Type = 'DWord' }
+            @{ Path = 'Policies\Microsoft\Dsh'; Name = 'AllowNewsAndInterests'; Value = 0; Type = 'DWord' }
+        )
+        foreach ($policy in ($script:windowsAiPolicies | Where-Object { $_.Scope -eq 'Device' -and $_.ApplyByDefault -ne $false })) {
+            $relativePolicyPath = [string]$policy.Path -replace '^SOFTWARE\\', ''
+            $deviceChecks += @{ Path = $relativePolicyPath; Name = $policy.Name; Value = $policy.Value; Type = $policy.Type }
+        }
+        foreach ($check in $deviceChecks) {
+            Set-WimRegistryValue -HiveRoot 'OfflineSW' -RelativePath $check.Path -Name $check.Name -Value $check.Value -Type $check.Type
+        }
+        Add-WimReportOperation -Name 'Apply device policy catalog' -Status 'Succeeded' -Detail "values=$($deviceChecks.Count)"
+        Write-Host "  System policy catalog configured" -ForegroundColor Green
+    } finally {
+        if ($softwareHiveSession -and $softwareHiveSession.Loaded) {
+            Close-WimRegistryHive -Session $softwareHiveSession
             $softwareHiveLoaded = $false
+            $softwareHiveSession = $null
         }
-        if ($wimMounted) {
-            if ($wimSave) {
-                Write-Host "`n  Unmounting and saving image..." -ForegroundColor Gray
-                Dismount-WindowsImage -Path $MountDir -Save -EA 0 | Out-Null
-                Write-Host "  Image saved successfully" -ForegroundColor Green
-            } else {
-                Write-Host "`n  Unmounting and discarding failed WIM changes..." -ForegroundColor Yellow
-                Dismount-WindowsImage -Path $MountDir -Discard -EA 0 | Out-Null
+    }
+
+    $wimCommitRequested = $true
+    } catch {
+        $wimFailure = $_.Exception.Message
+        $wimCommitRequested = $false
+        $wimSave = $false
+        $script:wimReport.status = 'Failed'
+        $script:wimReport.commit_status = 'DiscardRequired'
+        Add-WimReportOperation -Name 'WIM transaction' -Status 'Failed' -Detail $wimFailure
+        Write-Host "ERROR: WIM mode failed: $wimFailure" -ForegroundColor Red
+    } finally {
+        if ($defaultHiveSession -and $defaultHiveSession.Loaded) {
+            try {
+                Close-WimRegistryHive -Session $defaultHiveSession
+                $defaultHiveLoaded = $false
+                $defaultHiveSession = $null
+            } catch {
+                $wimCommitRequested = $false
+                $wimSave = $false
+                $wimFailure = $_.Exception.Message
+                Add-WimReportOperation -Name 'Unload HKU\OfflineWIM' -Status 'Failed' -Detail $wimFailure
             }
         }
+        if ($softwareHiveSession -and $softwareHiveSession.Loaded) {
+            try {
+                Close-WimRegistryHive -Session $softwareHiveSession
+                $softwareHiveLoaded = $false
+                $softwareHiveSession = $null
+            } catch {
+                $wimCommitRequested = $false
+                $wimSave = $false
+                $wimFailure = $_.Exception.Message
+                Add-WimReportOperation -Name 'Unload HKU\OfflineSW' -Status 'Failed' -Detail $wimFailure
+            }
+        }
+        if ($wimMounted) {
+            if ($wimCommitRequested) {
+                Write-Host "`n  Unmounting and saving image..." -ForegroundColor Gray
+                try {
+                    Dismount-WindowsImage -Path $resolvedMountDir -Save -ErrorAction Stop | Out-Null
+                    $remainingMounts = @(Get-WindowsImage -Mounted -ErrorAction Stop | Where-Object { ([string]$_.MountDir).TrimEnd('\') -ieq $resolvedMountDir.TrimEnd('\') })
+                    if ($remainingMounts.Count -gt 0) { throw 'DISM still reports the image as mounted after save' }
+                    $wimMounted = $false
+                    $wimSave = $true
+                    $script:wimReport.status = 'Complete'
+                    $script:wimReport.commit_status = 'Saved'
+                    Add-WimReportOperation -Name 'Save and dismount image' -Status 'Succeeded' -Detail $null
+                    Write-Host "  Image saved successfully" -ForegroundColor Green
+                } catch {
+                    $wimSave = $false
+                    $wimCommitRequested = $false
+                    $wimFailure = "Save failed: $($_.Exception.Message)"
+                    $script:wimReport.status = 'Failed'
+                    $script:wimReport.commit_status = 'SaveFailed'
+                    Add-WimReportOperation -Name 'Save and dismount image' -Status 'Failed' -Detail $wimFailure
+                    Write-Host "  Save failed; attempting discard..." -ForegroundColor Yellow
+                    try {
+                        Dismount-WindowsImage -Path $resolvedMountDir -Discard -ErrorAction Stop | Out-Null
+                        $remainingMounts = @(Get-WindowsImage -Mounted -ErrorAction Stop | Where-Object { ([string]$_.MountDir).TrimEnd('\') -ieq $resolvedMountDir.TrimEnd('\') })
+                        if ($remainingMounts.Count -gt 0) { throw 'DISM still reports the image as mounted after discard' }
+                        $wimMounted = $false
+                        $script:wimReport.commit_status = 'SaveFailedDiscarded'
+                        Add-WimReportOperation -Name 'Discard failed save' -Status 'Succeeded' -Detail $null
+                    } catch {
+                        $wimFailure = "$wimFailure; discard failed: $($_.Exception.Message)"
+                        $script:wimReport.commit_status = 'SaveAndDiscardFailed'
+                        Add-WimReportOperation -Name 'Discard failed save' -Status 'Failed' -Detail $_.Exception.Message
+                    }
+                }
+            } else {
+                Write-Host "`n  Unmounting and discarding failed WIM changes..." -ForegroundColor Yellow
+                try {
+                    Dismount-WindowsImage -Path $resolvedMountDir -Discard -ErrorAction Stop | Out-Null
+                    $remainingMounts = @(Get-WindowsImage -Mounted -ErrorAction Stop | Where-Object { ([string]$_.MountDir).TrimEnd('\') -ieq $resolvedMountDir.TrimEnd('\') })
+                    if ($remainingMounts.Count -gt 0) { throw 'DISM still reports the image as mounted after discard' }
+                    $wimMounted = $false
+                    $script:wimReport.commit_status = 'Discarded'
+                    Add-WimReportOperation -Name 'Discard failed transaction' -Status 'Succeeded' -Detail $null
+                } catch {
+                    $wimFailure = if ($wimFailure) { "$wimFailure; discard failed: $($_.Exception.Message)" } else { "Discard failed: $($_.Exception.Message)" }
+                    $script:wimReport.commit_status = 'DiscardFailed'
+                    Add-WimReportOperation -Name 'Discard failed transaction' -Status 'Failed' -Detail $_.Exception.Message
+                }
+            }
+        }
+        if ($wimMounted) { $script:wimReport.status = 'Failed'; $script:wimReport.commit_status = 'MountStillActive' }
+        Write-WimReport
     }
 
     if (-not $wimSave) { exit 2 }
@@ -688,7 +909,8 @@ if ($WimPath) {
     Write-Host ""
     Write-Host "=== WIM DEBLOAT COMPLETE ===" -ForegroundColor Green
     Write-Host "  Removed: $removed AppX packages" -ForegroundColor White
-    Write-Host "  Applied: privacy, telemetry, UI, OOBE, and AI policy tweaks" -ForegroundColor White
+    Write-Host "  Applied: $($script:wimReport.registry_values_applied) catalog registry values" -ForegroundColor White
+    Write-Host "  Report: $wimReportFile" -ForegroundColor White
     Write-Host "  Image ready for deployment via DISM, MDT, or WDS" -ForegroundColor Cyan
     exit 0
 }

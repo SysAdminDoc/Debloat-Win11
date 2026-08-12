@@ -584,19 +584,35 @@ Describe 'WIM Mode Resilience' {
 
     It 'saves only successful WIM mutations' {
         $scriptContent | Should -Match '\$wimSave = \$true'
-        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$MountDir -Save'
+        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$resolvedMountDir -Save'
+        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$resolvedMountDir -Save -ErrorAction Stop'
     }
 
     It 'discards mounted image changes on failure' {
         $scriptContent | Should -Match 'WIM mode failed'
-        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$MountDir -Discard'
+        $scriptContent | Should -Match 'Dismount-WindowsImage -Path \$resolvedMountDir -Discard'
     }
 
     It 'unloads offline hives in cleanup paths' {
         $scriptContent | Should -Match '\$defaultHiveLoaded'
         $scriptContent | Should -Match '\$softwareHiveLoaded'
-        $scriptContent | Should -Match 'reg unload "HKU\\OfflineWIM"'
-        $scriptContent | Should -Match 'reg unload "HKU\\OfflineSW"'
+        $scriptContent | Should -Match 'Open-WimRegistryHive'
+        $scriptContent | Should -Match 'Close-WimRegistryHive'
+    }
+
+    It 'validates DISM state and records transactional output' {
+        $scriptContent | Should -Match 'Get-WindowsImage -Mounted'
+        $scriptContent | Should -Match 'Mount directory must be empty'
+        $scriptContent | Should -Match 'AllowIrreversibleChanges'
+        $scriptContent | Should -Match 'commit_status'
+        $scriptContent | Should -Match 'catalog_version'
+        $scriptContent | Should -Match 'Debloat-WIM-.*\.json'
+    }
+
+    It 'uses the policy catalog for offline user and device registry writes' {
+        $scriptContent | Should -Match 'Get-DebloatUserRegistryChecks -Policies \$script:windowsAiPolicies -Tweaks \$script:hkcuTweaks'
+        $scriptContent | Should -Match 'Where-Object \{ \$_.Scope -eq ''Device'''
+        $scriptContent | Should -Not -Match 'reg add'
     }
 }
 

@@ -67,6 +67,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Network defaults preserve the current profile and do not enable discovery, file sharing, or LLMNR on Public networks.
 - Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
+- WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
 
 ### New in v2.3.9
 - Lockfile now detects stale PIDs from crashed runs instead of permanently blocking
@@ -294,7 +295,10 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\Debloat-Win11.ps1 -DiffManifests "manifest1.json","manifest2.json"
 
 # Offline WIM image debloat (for sysprep/MDT)
-.\Debloat-Win11.ps1 -WimPath "D:\sources\install.wim" -WimIndex 1
+.\Debloat-Win11.ps1 -WimPath "D:\sources\install.wim" -WimIndex 1 -AllowIrreversibleChanges
+
+# Validate image/index and preview without mounting or saving
+.\Debloat-Win11.ps1 -WimPath "D:\sources\install.wim" -WimIndex 1 -DryRun
 
 # Check for drifted settings (reset by Windows Update)
 .\Debloat-Win11.ps1 -CheckDrift
