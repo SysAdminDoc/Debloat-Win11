@@ -196,6 +196,28 @@ Describe 'Verified Operation Contract' {
         $scriptContent | Should -Match '<th>Scope</th><th>Status</th><th>Error</th>'
     }
 
+    It 'writes correlation-linked structured summaries and bounded redacted crash artifacts' {
+        $scriptContent | Should -Match 'correlation_id'
+        $scriptContent | Should -Match 'summaryPayload'
+        $scriptContent | Should -Match 'OutputFormat'
+        $scriptContent | Should -Match 'Invoke-DebloatLogRetention'
+        $scriptContent | Should -Match 'Write-DebloatRedactedFile'
+        $scriptContent | Should -Match 'redaction_policy'
+        $scriptContent | Should -Match 'rollback_unsupported'
+        $scriptContent | Should -Match 'package_operations'
+    }
+
+    It 'enforces a reviewed static-analysis warning/error budget' {
+        $analysisContent = Get-Content (Join-Path $repoRoot 'tools\Invoke-StaticAnalysis.ps1') -Raw
+        $baseline = Get-Content (Join-Path $repoRoot 'tools\StaticAnalysisBaseline.json') -Raw | ConvertFrom-Json
+        $analysisContent | Should -Match 'MaxWarnings'
+        $analysisContent | Should -Match 'MaxErrors'
+        $analysisContent | Should -Match 'warning_budget'
+        $analysisContent | Should -Match 'error_budget'
+        $baseline.max_warning_count | Should -BeGreaterOrEqual $baseline.warning_count
+        $baseline.max_error_count | Should -Be 0
+    }
+
     It 'uses Pester Should-Invoke syntax for cross-version mock assertions' {
         $testsContent = Get-Content $PSScriptRoot\Debloat-Win11.Tests.ps1 -Raw
         $testsContent | Should -Not -Match 'Assert-MockCalled\s+\w+\s+-Times'

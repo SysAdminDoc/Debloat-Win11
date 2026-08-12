@@ -69,6 +69,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
 - The policy catalog also carries per-phase risk, scope, prerequisites, rollback, and supported build/edition/architecture metadata; selected unsupported actions fail before mutation.
 - WinGet updates are opt-in and limited to exact `PackageUpdates` entries in the configuration; restore accepts an exact package ID with optional `-RestoreSource` and `-RestoreVersion`, then writes a JSON before/after report.
+- Each run emits correlation-linked JSON summary and manifest artifacts, includes every tracked/package operation and rollback limitation, retains only the newest 50 artifacts per type, and supports `-OutputFormat Text|Json|Csv` for noninteractive callers.
 - WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
 - The Windows integration harness is skipped unless `DEBLOAT_WIN11_INTEGRATION_VM=1` and `-AllowMutation` are supplied on a disposable elevated VM; failed runs preserve artifacts.
 
@@ -993,15 +994,20 @@ SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize
 ### Log Location
 ```
 <LogDir>\Debloat-YYYY-MM-DD-HHmmss.log
-<LogDir>\Debloat-Undo-YYYY-MM-DD-HHmmss.json
+<LogDir>\Debloat-Manifest-YYYY-MM-DD-HHmmss-<run-id>.json
+<LogDir>\Debloat-Summary-YYYY-MM-DD-HHmmss-<run-id>.json
+<LogDir>\Debloat-Report-YYYY-MM-DD-HHmmss-<run-id>.html
 ```
 
 Default `LogDir`: `%ProgramData%\Debloat-Win11\Logs` (configurable via `-LogDir`)
+The script keeps the newest 50 files for each generated artifact type. The manifest and summary are local audit records; an error bundle contains only redacted copies.
 
 ### Log Format
 ```
-[TIMESTAMP] [LEVEL] Message
+[TIMESTAMP] [LEVEL] [CORRELATION-ID] Message
 ```
+
+Crash-bundle redaction replaces usernames, computer names, user/profile roots, `%ProgramData%`, temporary roots, and secret-like `password`, `token`, `secret`, or `api-key` values with placeholders. Bundles are never uploaded automatically. The full manifest remains local because its paths and old values are needed for audit and undo workflows.
 
 ### Log Levels
 
@@ -1189,6 +1195,8 @@ EdgeBookmarks = @(
 # Optional PowerShell 7 compatibility check with Pester 6.0.1
 pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 6.0.1; Invoke-Pester .\tests\ -Output Normal"
 .\tools\Invoke-StaticAnalysis.ps1
+# Emit the analyzer budget/result as one JSON object
+.\tools\Invoke-StaticAnalysis.ps1 -Json
 
 # Disposable-VM integration path (explicitly skipped on ordinary machines)
 .\tools\Invoke-WindowsIntegrationTests.ps1

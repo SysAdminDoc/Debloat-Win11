@@ -18,6 +18,8 @@ param(
     [string[]]$Only,
     [string[]]$Skip,
     [switch]$Silent,
+    [ValidateSet('Text','Json','Csv')]
+    [string]$OutputFormat = 'Text',
     [switch]$Explain,
     [string]$RestoreApp,
     [string]$RestoreSource,
@@ -1179,6 +1181,12 @@ $script:manifest = @{
         supplied = [bool]$ConfigPath
         config_hash = $script:configurationHash
     }
+    observability = [ordered]@{
+        schema_version = 1
+        redaction_policy = 'Crash bundles redact usernames, computer names, profile roots, well-known data roots, and secret-like key/value pairs; operational manifests remain local audit records.'
+        log_retention_per_type = 50
+        summary_format = 'json'
+    }
     scope = [ordered]@{
         user_policy = if ($AllUsers) { 'AllUsers' } else { 'CurrentUser' }
         machine = 'Machine'
@@ -1217,8 +1225,32 @@ $script:manifest = @{
 # LOGGING SETUP
 # ============================================================================
 if (!(Test-Path $LogDir)) { New-Item -Path $LogDir -ItemType Directory -Force | Out-Null }
-$logFile = "$LogDir\Debloat-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').log"
-$manifestFile = "$LogDir\Debloat-Manifest-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').json"
+$runStamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
+$runShortId = $script:manifest.correlation_id.Substring(0, 8)
+$logFile = "$LogDir\Debloat-$runStamp-$runShortId.log"
+$manifestFile = "$LogDir\Debloat-Manifest-$runStamp-$runShortId.json"
+$summaryFile = "$LogDir\Debloat-Summary-$runStamp-$runShortId.json"
+$htmlReportFile = "$LogDir\Debloat-Report-$runStamp-$runShortId.html"
+$script:manifest.artifacts = [ordered]@{
+    log = $logFile
+    manifest = $manifestFile
+    summary = $summaryFile
+    html_report = $htmlReportFile
+}
+
+function Invoke-DebloatLogRetention {
+    param([Parameter(Mandatory)][string]$Directory, [int]$KeepPerType = 50)
+    $patterns = @('Debloat-*.log', 'Debloat-Manifest-*.json', 'Debloat-Summary-*.json', 'Debloat-Report-*.html', 'Debloat-Restore-*.json', 'Debloat-WIM-Report-*.json')
+    foreach ($pattern in $patterns) {
+        $files = @(Get-ChildItem -LiteralPath $Directory -Filter $pattern -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+        if ($files.Count -le $KeepPerType) { continue }
+        foreach ($oldFile in @($files | Select-Object -Skip $KeepPerType)) {
+            Remove-Item -LiteralPath $oldFile.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Invoke-DebloatLogRetention -Directory $LogDir -KeepPerType ([int]$script:manifest.observability.log_retention_per_type)
 
 # Register EventLog source for SIEM/compliance (idempotent)
 $script:eventLogSource = 'Debloat-Win11'
@@ -1230,7 +1262,8 @@ function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $prefix = if ($DryRun) { "[DRY RUN] " } else { "" }
-    $logEntry = "[$timestamp] [$Level] $prefix$Message"
+    $correlation = if ($script:manifest.correlation_id) { "[$($script:manifest.correlation_id)] " } else { '' }
+    $logEntry = "[$timestamp] [$Level] $correlation$prefix$Message"
     Add-Content -Path $logFile -Value $logEntry -EA 0
 
     # Write key events to Windows Event Log for SIEM forwarding
@@ -1240,7 +1273,7 @@ function Write-Log {
         Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1001 -EntryType Information -Message "$prefix$Message" -EA 0
     }
 
-    if ($Silent) { if ($Level -eq 'ERROR') { $script:exitCode = 1 }; return }
+    if ($Silent -or $OutputFormat -ne 'Text' -or -not [Environment]::UserInteractive) { if ($Level -eq 'ERROR') { $script:exitCode = 1 }; return }
 
     switch ($Level) {
         "INFO"    { Write-Host "$prefix$Message" -ForegroundColor Cyan }
@@ -1279,6 +1312,39 @@ function Register-OperationResult {
         'Succeeded' { $script:counters.OperationsSucceeded++ }
         'Failed'    { $script:counters.OperationsFailed++; $script:exitCode = 1 }
         'Skipped'   { $script:counters.OperationsSkipped++ }
+    }
+}
+
+function ConvertTo-DebloatRedactedText {
+    param([AllowNull()][string]$Text)
+    if ($null -eq $Text) { return $null }
+    $redacted = $Text
+    $knownRoots = @(
+        @{ Value = $env:USERPROFILE; Token = '<USERPROFILE>' }
+        @{ Value = $env:ProgramData; Token = '<PROGRAMDATA>' }
+        @{ Value = $env:TEMP; Token = '<TEMP>' }
+        @{ Value = $env:TMP; Token = '<TEMP>' }
+    )
+    foreach ($root in $knownRoots) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$root.Value)) {
+            $redacted = $redacted -replace [regex]::Escape([string]$root.Value), [string]$root.Token
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$env:USERNAME)) { $redacted = $redacted -replace [regex]::Escape([string]$env:USERNAME), '<USERNAME>' }
+    if (-not [string]::IsNullOrWhiteSpace([string]$env:COMPUTERNAME)) { $redacted = $redacted -replace [regex]::Escape([string]$env:COMPUTERNAME), '<COMPUTERNAME>' }
+    $redacted = [regex]::Replace($redacted, '(?i)((?:password|passwd|token|secret|api[_-]?key)\s*[:=]\s*)("[^"]*"|''[^'']*''|[^,\s}\r\n]+)', '$1<REDACTED>')
+    return $redacted
+}
+
+function Write-DebloatRedactedFile {
+    param([Parameter(Mandatory)][string]$SourcePath, [Parameter(Mandatory)][string]$DestinationPath)
+    try {
+        $sourceText = [System.IO.File]::ReadAllText($SourcePath)
+        $redactedText = ConvertTo-DebloatRedactedText -Text $sourceText
+        [System.IO.File]::WriteAllText($DestinationPath, $redactedText, [System.Text.Encoding]::UTF8)
+        return $true
+    } catch {
+        return $false
     }
 }
 
@@ -2334,6 +2400,7 @@ try {
 # GENERATE STANDALONE REVERT SCRIPT
 # ============================================================================
 $revertFile = "$LogDir\Debloat-Revert-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').ps1"
+$script:manifest.artifacts.revert = $revertFile
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
@@ -2392,7 +2459,6 @@ try {
 # ============================================================================
 # HTML REPORT (self-contained single file)
 # ============================================================================
-$htmlReportFile = "$LogDir\Debloat-Report-$(Get-Date -Format 'yyyy-MM-dd-HHmmss').html"
 try {
     $dryLabel = if ($DryRun) { " (DRY RUN)" } else { "" }
     function ConvertTo-HtmlCell {
@@ -2430,6 +2496,24 @@ try {
         $operationError = ConvertTo-HtmlCell $_.error
         "<tr><td>$operationName</td><td>$operationAction</td><td>$operationScope</td><td>$operationStatus</td><td>$operationError</td></tr>"
     }) -join "`n"
+    $packageRows = ($script:manifest.changes.package_operations | ForEach-Object {
+        $packageId = ConvertTo-HtmlCell $_.id
+        $packageSource = ConvertTo-HtmlCell $_.source
+        $requestedVersion = ConvertTo-HtmlCell $_.requested_version
+        $beforeVersion = ConvertTo-HtmlCell $_.before_version
+        $afterVersion = ConvertTo-HtmlCell $_.after_version
+        $packageStatus = ConvertTo-HtmlCell $_.status
+        $returnCode = ConvertTo-HtmlCell $_.return_code
+        $packageReason = ConvertTo-HtmlCell $_.reason
+        "<tr><td>$packageId</td><td>$packageSource</td><td>$requestedVersion</td><td>$beforeVersion</td><td>$afterVersion</td><td>$packageStatus</td><td>$returnCode</td><td>$packageReason</td></tr>"
+    }) -join "`n"
+    $rollbackRows = ($unsupportedRollback | ForEach-Object {
+        "<tr><td>$(ConvertTo-HtmlCell $_)</td></tr>"
+    }) -join "`n"
+    $hostCell = ConvertTo-HtmlCell $env:COMPUTERNAME
+    $osCell = ConvertTo-HtmlCell $osName
+    $buildCell = ConvertTo-HtmlCell $osBuild
+    $correlationCell = ConvertTo-HtmlCell $script:manifest.correlation_id
 
     $htmlContent = @"
 <!DOCTYPE html>
@@ -2443,7 +2527,7 @@ th{background:#313244;color:#89b4fa}tr:nth-child(even){background:#181825}
 .stat{font-size:1.1em;margin:.3em 0}.stat b{color:#f9e2af}
 </style></head><body>
 <h1>Debloat-Win11 Report$dryLabel</h1>
-<p>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Host: $env:COMPUTERNAME | OS: $osName (Build $osBuild)</p>
+<p>Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Host: $hostCell | OS: $osCell (Build $buildCell) | Correlation: $correlationCell</p>
 <div class="stat"><b>Run Status:</b> $(ConvertTo-HtmlCell $script:manifest.status) | <b>Operations Attempted:</b> $($script:counters.OperationsAttempted) | <b>Succeeded:</b> $($script:counters.OperationsSucceeded) | <b>Failed:</b> $($script:counters.OperationsFailed) | <b>Skipped:</b> $($script:counters.OperationsSkipped)</div>
 <div class="stat"><b>AppX Removed:</b> $($script:counters.AppxRemoved) | <b>Services Disabled:</b> $($script:counters.ServicesDisabled) | <b>Tasks Disabled:</b> $($script:counters.TasksDisabled) | <b>Registry Tweaks:</b> $($script:counters.RegistryTweaks)</div>
 
@@ -2470,6 +2554,16 @@ $appRows
 <h2>Scheduled Tasks Disabled ($($script:manifest.changes.tasks_disabled.Count))</h2>
 <table><tr><th>Task</th><th>Action</th></tr>
 $taskRows
+</table>
+
+<h2>Package Operations ($($script:manifest.changes.package_operations.Count))</h2>
+<table><tr><th>Id</th><th>Source</th><th>Requested</th><th>Before</th><th>After</th><th>Status</th><th>Return Code</th><th>Reason</th></tr>
+$packageRows
+</table>
+
+<h2>Unsupported Rollback Items ($($unsupportedRollback.Count))</h2>
+<table><tr><th>Limitation</th></tr>
+$rollbackRows
 </table>
 
 </body></html>
@@ -2501,32 +2595,89 @@ if ($systemDriveEnd -and $script:counters.DiskBefore -gt 0) {
 
 $dryLabel = if ($DryRun) { " (DRY RUN)" } else { "" }
 
-Write-Host ""
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "DEBLOAT SUMMARY$dryLabel" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host ("  AppX Packages Removed:     {0}" -f $script:counters.AppxRemoved) -ForegroundColor White
-Write-Host ("  Office Components Removed: {0}" -f $script:counters.OfficeRemoved) -ForegroundColor White
-Write-Host ("  OEM Apps Cleaned:          {0}" -f $script:counters.OEMCleaned) -ForegroundColor White
-Write-Host ("  Services Disabled:         {0}" -f $script:counters.ServicesDisabled) -ForegroundColor White
-Write-Host ("  Tasks Disabled:            {0}" -f $script:counters.TasksDisabled) -ForegroundColor White
-Write-Host ("  Registry Tweaks Applied:   {0}" -f $script:counters.RegistryTweaks) -ForegroundColor White
-Write-Host ("  Operations Attempted:       {0}" -f $script:counters.OperationsAttempted) -ForegroundColor White
-Write-Host ("  Operations Succeeded:       {0}" -f $script:counters.OperationsSucceeded) -ForegroundColor White
-Write-Host ("  Operations Failed:          {0}" -f $script:counters.OperationsFailed) -ForegroundColor $(if ($script:counters.OperationsFailed -gt 0) { 'Red' } else { 'White' })
-Write-Host ("  Operations Skipped:         {0}" -f $script:counters.OperationsSkipped) -ForegroundColor White
-Write-Host ("  Run Status:                 {0}" -f $script:manifest.status) -ForegroundColor $(if ($script:manifest.status -eq 'Complete' -or $script:manifest.status -eq 'Planned') { 'Green' } else { 'Red' })
-Write-Host ("  Disk Space Recovered:      {0}" -f $diskRecovered) -ForegroundColor White
-Write-Host ("  Runtime:                   {0}" -f $runtimeStr) -ForegroundColor White
-Write-Host ("  Log File:                  {0}" -f $logFile) -ForegroundColor White
-Write-Host ("  Undo Manifest:             {0}" -f $manifestFile) -ForegroundColor White
-Write-Host "============================================" -ForegroundColor Cyan
+if ($OutputFormat -eq 'Text') {
+    Write-Host ""
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host "DEBLOAT SUMMARY$dryLabel" -ForegroundColor Cyan
+    Write-Host "============================================" -ForegroundColor Cyan
+    Write-Host ("  AppX Packages Removed:     {0}" -f $script:counters.AppxRemoved) -ForegroundColor White
+    Write-Host ("  Office Components Removed: {0}" -f $script:counters.OfficeRemoved) -ForegroundColor White
+    Write-Host ("  OEM Apps Cleaned:          {0}" -f $script:counters.OEMCleaned) -ForegroundColor White
+    Write-Host ("  Services Disabled:         {0}" -f $script:counters.ServicesDisabled) -ForegroundColor White
+    Write-Host ("  Tasks Disabled:            {0}" -f $script:counters.TasksDisabled) -ForegroundColor White
+    Write-Host ("  Registry Tweaks Applied:   {0}" -f $script:counters.RegistryTweaks) -ForegroundColor White
+    Write-Host ("  Operations Attempted:       {0}" -f $script:counters.OperationsAttempted) -ForegroundColor White
+    Write-Host ("  Operations Succeeded:       {0}" -f $script:counters.OperationsSucceeded) -ForegroundColor White
+    Write-Host ("  Operations Failed:          {0}" -f $script:counters.OperationsFailed) -ForegroundColor $(if ($script:counters.OperationsFailed -gt 0) { 'Red' } else { 'White' })
+    Write-Host ("  Operations Skipped:         {0}" -f $script:counters.OperationsSkipped) -ForegroundColor White
+    Write-Host ("  Run Status:                 {0}" -f $script:manifest.status) -ForegroundColor $(if ($script:manifest.status -eq 'Complete' -or $script:manifest.status -eq 'Planned') { 'Green' } else { 'Red' })
+    Write-Host ("  Disk Space Recovered:      {0}" -f $diskRecovered) -ForegroundColor White
+    Write-Host ("  Runtime:                   {0}" -f $runtimeStr) -ForegroundColor White
+    Write-Host ("  Log File:                  {0}" -f $logFile) -ForegroundColor White
+    Write-Host ("  Undo Manifest:             {0}" -f $manifestFile) -ForegroundColor White
+    Write-Host "============================================" -ForegroundColor Cyan
+}
 
 # Log the summary too
 Write-Log "=== DEBLOAT COMPLETE ===" "INFO"
 Write-Log "AppX: $($script:counters.AppxRemoved) | Services: $($script:counters.ServicesDisabled) | Tasks: $($script:counters.TasksDisabled) | Registry: $($script:counters.RegistryTweaks)" "INFO"
 Write-Log "Operations: attempted=$($script:counters.OperationsAttempted) succeeded=$($script:counters.OperationsSucceeded) failed=$($script:counters.OperationsFailed) skipped=$($script:counters.OperationsSkipped) status=$($script:manifest.status)" "INFO"
 Write-Log "Exit code: $script:exitCode" "INFO"
+
+$summaryPayload = [ordered]@{
+    schema_version = 1
+    product = 'Debloat-Win11'
+    version = $script:manifest.version
+    correlation_id = $script:manifest.correlation_id
+    timestamp = $script:manifest.timestamp
+    status = $script:manifest.status
+    dryrun = $script:manifest.dryrun
+    scope = $script:manifest.scope
+    runtime = $script:manifest.runtime
+    operation_summary = $script:manifest.operation_summary
+    operations = @($script:manifest.changes.operations)
+    package_operations = @($script:manifest.changes.package_operations)
+    counts = [ordered]@{
+        appx_removed = $script:counters.AppxRemoved
+        office_removed = $script:counters.OfficeRemoved
+        oem_cleaned = $script:counters.OEMCleaned
+        services_disabled = $script:counters.ServicesDisabled
+        tasks_disabled = $script:counters.TasksDisabled
+        registry_tweaks = $script:counters.RegistryTweaks
+        package_operations = @($script:manifest.changes.package_operations).Count
+    }
+    rollback_unsupported = @($unsupportedRollback)
+    artifacts = $script:manifest.artifacts
+}
+try {
+    [System.IO.File]::WriteAllText($summaryFile, ($summaryPayload | ConvertTo-Json -Depth 10), [System.Text.Encoding]::UTF8)
+    $script:manifest.observability.summary_path = $summaryFile
+    $script:manifest.observability.correlation_id = $script:manifest.correlation_id
+    [System.IO.File]::WriteAllText($manifestFile, ($script:manifest | ConvertTo-Json -Depth 12), [System.Text.Encoding]::UTF8)
+} catch {
+    Write-Log "Could not write structured summary artifacts: $($_.Exception.Message)" "WARNING"
+}
+
+if ($OutputFormat -eq 'Json') {
+    Write-Output ($summaryPayload | ConvertTo-Json -Depth 10 -Compress)
+} elseif ($OutputFormat -eq 'Csv') {
+    $csvPayload = [ordered]@{
+        version = $summaryPayload.version
+        correlation_id = $summaryPayload.correlation_id
+        status = $summaryPayload.status
+        dryrun = $summaryPayload.dryrun
+        scope = $summaryPayload.scope.user_policy
+        os_build = $summaryPayload.runtime.os_build
+        edition = $summaryPayload.runtime.edition
+        architecture = $summaryPayload.runtime.architecture
+        operations_attempted = $summaryPayload.operation_summary.attempted
+        operations_succeeded = $summaryPayload.operation_summary.succeeded
+        operations_failed = $summaryPayload.operation_summary.failed
+        operations_skipped = $summaryPayload.operation_summary.skipped
+        summary_file = $summaryFile
+    }
+    Write-Output (($csvPayload | ConvertTo-Csv -NoTypeInformation) -join "`n")
+}
 
 # Write completion event to EventLog
 $summaryMsg = "Debloat-Win11 v2.3.10 status=$($script:manifest.status). AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) OperationsFailed=$($script:counters.OperationsFailed) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
@@ -2540,10 +2691,9 @@ if ($script:exitCode -ne 0) {
     $crashZip = "$env:TEMP\Debloat-Win11-crash-$crashTs.zip"
     try {
         New-Item -Path $crashDir -ItemType Directory -Force | Out-Null
-        if (Test-Path $logFile) { Copy-Item $logFile $crashDir -EA 0 }
-        if (Test-Path $manifestFile) { Copy-Item $manifestFile $crashDir -EA 0 }
+        if (Test-Path -LiteralPath $logFile -PathType Leaf) { Write-DebloatRedactedFile -SourcePath $logFile -DestinationPath (Join-Path $crashDir 'log-redacted.log') | Out-Null }
+        if (Test-Path -LiteralPath $manifestFile -PathType Leaf) { Write-DebloatRedactedFile -SourcePath $manifestFile -DestinationPath (Join-Path $crashDir 'manifest-redacted.json') | Out-Null }
         $sysInfo = @{
-            ComputerName = $env:COMPUTERNAME
             OSName       = $osName
             Build        = $osBuild
             EditionId    = $editionId
@@ -2552,6 +2702,8 @@ if ($script:exitCode -ne 0) {
             IsSSD        = $script:isSSD
             RAM_GB       = $totalRAM
             ExitCode     = $script:exitCode
+            CorrelationId = $script:manifest.correlation_id
+            RedactionPolicy = $script:manifest.observability.redaction_policy
             Timestamp    = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
         }
         $sysInfo | ConvertTo-Json | Set-Content "$crashDir\system-info.json" -EA 0
@@ -2564,7 +2716,7 @@ if ($script:exitCode -ne 0) {
     }
 }
 
-Write-Host "`nRestart recommended to apply all changes." -ForegroundColor Yellow
+if ($OutputFormat -eq 'Text') { Write-Host "`nRestart recommended to apply all changes." -ForegroundColor Yellow }
 
 # Clean up lockfile
 Remove-Item $script:lockFile -Force -EA 0
