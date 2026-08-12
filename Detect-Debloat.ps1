@@ -18,7 +18,7 @@ param(
     [string]$LogDir = "$env:ProgramData\Debloat-Win11\Logs"
 )
 
-$expectedVersion = 'v2.3.10'
+$expectedVersion = 'v2.3.11'
 $manifestSchemaVersion = 2
 $catalogPath = Join-Path $PSScriptRoot 'Modules\PolicyCatalog.psd1'
 $reasons = [System.Collections.ArrayList]@()

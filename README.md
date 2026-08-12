@@ -2,9 +2,9 @@
 
 # Windows 11 Complete Debloat Script
 
-![Version](https://img.shields.io/badge/version-v2.3.10-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
+![Version](https://img.shields.io/badge/version-v2.3.11-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Platform](https://img.shields.io/badge/platform-PowerShell-lightgrey)
 
-**Version:** v2.3.10
+**Version:** v2.3.11
 **Author:** SysAdminDoc
 **Last Updated:** August 2026
 **Lines of Code:** ~3,800
@@ -58,7 +58,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 
 ## Features at a Glance
 
-### New in v2.3.10
+### New in v2.3.11
 - Maintenance and drift remediation now apply shared HKCU tweaks to already-loaded user profiles, including profiles active while the task runs as SYSTEM.
 - Shared HKCU propagation honors optional registry `Type` metadata instead of forcing every value to `REG_DWORD`.
 - AppX removal counters now include provisioned-only packages while avoiding duplicate manifest entries.

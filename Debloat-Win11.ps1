@@ -2,7 +2,7 @@
 #Requires -Version 5.1
 
 # ============================================================================
-# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.10
+# WINDOWS 11 COMPLETE DEBLOAT SCRIPT v2.3.11
 # Includes: App removal, Office nuclear scrub, OEM cleanup, registry tweaks
 # Production ready - unattended deployment on new or existing PCs
 # ============================================================================
@@ -1187,7 +1187,7 @@ $script:counters = @{
 $script:manifest = @{
     schema_version = 2
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
-    version   = 'v2.3.10'
+    version   = 'v2.3.11'
     correlation_id = [guid]::NewGuid().ToString()
     dryrun    = $DryRun.IsPresent
     catalog   = [ordered]@{
@@ -1625,7 +1625,7 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
 # ============================================================================
 # STARTUP BANNER
 # ============================================================================
-Write-Log "=== WINDOWS DEBLOAT v2.3.10 STARTING ===" "INFO"
+Write-Log "=== WINDOWS DEBLOAT v2.3.11 STARTING ===" "INFO"
 if ($Explain) { Write-Log "*** EXPLAIN MODE - Showing rationale for each phase, no changes will be made ***" "WARNING" }
 elseif ($DryRun) { Write-Log "*** DRY RUN MODE - No changes will be made ***" "WARNING" }
 Write-Log "Log file: $logFile" "INFO"
@@ -2410,7 +2410,7 @@ if ($DryRun) {
     $stampResult = Invoke-TrackedOperation -Name 'Completion registry stamp' -Action 'Record run status and manifest path' -Scope 'Machine' -Operation {
         $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
         if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force -EA Stop | Out-Null }
-        Set-DebloatRegistryProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "Version" -Value "v2.3.11" -Type String -EA Stop
         Set-DebloatRegistryProperty -Path $regStampPath -Name "Status" -Value $stampStatus -Type String -EA Stop
         Set-DebloatRegistryProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -EA Stop
         Set-DebloatRegistryProperty -Path $regStampPath -Name "ManifestSchemaVersion" -Value ([int]$script:manifest.schema_version) -Type DWord -EA Stop
@@ -2446,7 +2446,7 @@ $script:manifest.artifacts.revert = $revertFile
 try {
     $revertLines = [System.Collections.ArrayList]@()
     $revertLines.Add('#Requires -RunAsAdministrator') | Out-Null
-    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.10") | Out-Null
+    $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.11") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
     $revertLines.Add('$revertExitCode = 0') | Out-Null
@@ -2722,7 +2722,7 @@ if ($OutputFormat -eq 'Json') {
 }
 
 # Write completion event to EventLog
-$summaryMsg = "Debloat-Win11 v2.3.10 status=$($script:manifest.status). AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) OperationsFailed=$($script:counters.OperationsFailed) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
+$summaryMsg = "Debloat-Win11 v2.3.11 status=$($script:manifest.status). AppX=$($script:counters.AppxRemoved) Services=$($script:counters.ServicesDisabled) Tasks=$($script:counters.TasksDisabled) Registry=$($script:counters.RegistryTweaks) OperationsFailed=$($script:counters.OperationsFailed) Disk=$diskRecovered Runtime=$runtimeStr ExitCode=$script:exitCode"
 $evtType = if ($script:exitCode -eq 0) { 'Information' } else { 'Warning' }
 Write-EventLog -LogName 'Application' -Source $script:eventLogSource -EventId 1000 -EntryType $evtType -Message $summaryMsg -EA 0
 

@@ -2,7 +2,7 @@
 
 All notable changes to Debloat-Win11 will be documented in this file.
 
-## Unreleased
+## [v2.3.11] - 2026-08-12
 
 ### Fixed
 - Phase selection now gates system-tweak subphases, pre/post service handling, maintenance registration, Explorer restart, and WinGet updates.
@@ -22,6 +22,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - Runs now emit correlation-linked JSON summaries, include all tracked/package operations and rollback limitations, bound generated artifact retention, redact crash-bundle copies, and enforce a reviewed PSScriptAnalyzer warning/error budget.
 - Added `tools\Export-PolicyArtifacts.ps1`, which emits catalog-backed WindowsAI and inbox-AppX OMA-URI/GPO mappings with documented build/edition/scope applicability and explicit unsupported/preview states.
 - Added offline `tools\ValidationRequirements.psd1` and `tools\Get-ValidationEnvironment.ps1`; exact test-tool versions, current module manifest hashes, runtime support, and missing-dependency reasons are reported without installation.
+- Static-analysis validation now resolves its default baseline after parameter binding, so the documented Windows PowerShell 5.1 JSON gate works without an explicit path.
 - Drift detection, remediation, compliance detection, and scheduled maintenance now share stable Text/JSON/CSV output contracts with structured status summaries and non-success exit codes.
 - The policy catalog now owns the supported Windows client build/edition/architecture matrix; unsupported runs fail before mutation unless explicitly overridden, and overrides remain noncompliant in the manifest.
 - Network defaults preserve connection profiles, restrict sharing rules to Domain/Private, and exclude LLMNR; OEM cleanup no longer targets Intel drivers, language packs, or Windows Security startup.

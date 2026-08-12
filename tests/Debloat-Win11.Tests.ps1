@@ -832,7 +832,7 @@ Describe 'Concurrent Execution Guard' {
 Describe 'Registry Version Stamp' {
     It 'writes version to HKLM registry key' {
         $scriptContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
-        $scriptContent | Should -Match 'Version.*v2\.3\.10'
+        $scriptContent | Should -Match 'Version.*v2\.3\.11'
     }
 
     It 'detection script checks registry first' {
