@@ -9,7 +9,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - Registry, service, task, AppX, firewall, and selected orchestrator operations record planned/succeeded/failed/skipped results; incomplete runs are not detected as compliant.
 - Module cleanup paths now use the same tracked-operation contract, verify service/feature/firewall/time changes, and include operation status/error rows in console, JSON, and HTML output.
 - Destructive package, OEM, Office, OneDrive, firewall, file, startup, feature, and bookmark cleanup requires explicit `-AllowIrreversibleChanges` approval.
-- Test mocks use Pester's `Should -Invoke` syntax; the 152-test suite passes under Pester 5.9 and 6.0.1 on PowerShell 7 and under Windows PowerShell 5.1 with Pester 5.9.
+- Test mocks use Pester's `Should -Invoke` syntax; the 155-test suite passes under Pester 5.9 and 6.0.1 on PowerShell 7 and under Windows PowerShell 5.1 with Pester 5.9.
 - Added `tools/Invoke-TestSuite.ps1` to validate an installed Pester version before running the suite; the declared matrix is Pester 5.9.0 on Windows PowerShell 5.1/PowerShell 7 and Pester 6.0.1 on PowerShell 7.
 - Added versioned, data-only `Modules/PolicyCatalog.psd1` for Windows AI policies, shared HKCU tweaks, and typed config-schema validation; removed executable policy-data loading.
 - Drift detection and remediation now enumerate Win32_UserProfile/ProfileList records, operate directly on loaded hives, temporarily load offline hives with checked cleanup, and report per-setting/profile outcomes.
@@ -22,6 +22,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - Runs now emit correlation-linked JSON summaries, include all tracked/package operations and rollback limitations, bound generated artifact retention, redact crash-bundle copies, and enforce a reviewed PSScriptAnalyzer warning/error budget.
 - Added `tools\Export-PolicyArtifacts.ps1`, which emits catalog-backed WindowsAI and inbox-AppX OMA-URI/GPO mappings with documented build/edition/scope applicability and explicit unsupported/preview states.
 - Added offline `tools\ValidationRequirements.psd1` and `tools\Get-ValidationEnvironment.ps1`; exact test-tool versions, current module manifest hashes, runtime support, and missing-dependency reasons are reported without installation.
+- Drift detection, remediation, compliance detection, and scheduled maintenance now share stable Text/JSON/CSV output contracts with structured status summaries and non-success exit codes.
 - Network defaults preserve connection profiles, restrict sharing rules to Domain/Private, and exclude LLMNR; OEM cleanup no longer targets Intel drivers, language packs, or Windows Security startup.
 
 ## [v2.3.10] - 2026-08-11

@@ -7,6 +7,12 @@
 # Does NOT remove apps or delete files -- registry tweaks only.
 # Applies HKLM policies machine-wide and HKCU tweaks to all user profiles.
 
+[CmdletBinding()]
+param(
+    [ValidateSet('Text','Json','Csv')]
+    [string]$OutputFormat = 'Text'
+)
+
 $ErrorActionPreference = "SilentlyContinue"
 $logDir = "$env:ProgramData\Debloat-Win11\Logs"
 if (!(Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
@@ -141,3 +147,24 @@ Write-MaintainLog "=== MAINTENANCE COMPLETE: $count settings re-applied; $skippe
 
 $msg = "Debloat-Win11 maintenance: $count registry settings re-applied; $skippedProfiles profiles skipped after Windows Update"
 Write-EventLog -LogName 'Application' -Source $eventSource -EventId 1002 -EntryType Information -Message $msg -EA 0
+$maintenanceStatus = if ($profileEnumerationError -or $skippedProfiles -gt 0) { 'Incomplete' } else { 'Success' }
+$maintenanceResult = [ordered]@{
+    schema_version = 1
+    product = 'Debloat-Win11'
+    status = $maintenanceStatus
+    output_format = $OutputFormat
+    settings_reapplied = $count
+    skipped_profiles = $skippedProfiles
+    profile_enumeration_error = $profileEnumerationError
+    log_file = $logFile
+    catalog_version = [string]$policyCatalog.CatalogVersion
+}
+if ($OutputFormat -eq 'Json') {
+    Write-Output ($maintenanceResult | ConvertTo-Json -Depth 6 -Compress)
+} elseif ($OutputFormat -eq 'Csv') {
+    Write-Output (($maintenanceResult | ConvertTo-Csv -NoTypeInformation) -join "`n")
+} else {
+    Write-Output ("Debloat-Win11 maintenance: status={0} settings_reapplied={1} skipped_profiles={2}" -f $maintenanceStatus, $count, $skippedProfiles)
+}
+if ($maintenanceStatus -eq 'Success') { exit 0 }
+exit 1

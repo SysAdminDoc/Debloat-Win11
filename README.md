@@ -70,6 +70,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - The policy catalog also carries per-phase risk, scope, prerequisites, rollback, and supported build/edition/architecture metadata; selected unsupported actions fail before mutation.
 - WinGet updates are opt-in and limited to exact `PackageUpdates` entries in the configuration; restore accepts an exact package ID with optional `-RestoreSource` and `-RestoreVersion`, then writes a JSON before/after report.
 - Each run emits correlation-linked JSON summary and manifest artifacts, includes every tracked/package operation and rollback limitation, retains only the newest 50 artifacts per type, and supports `-OutputFormat Text|Json|Csv` for noninteractive callers.
+- `Detect-Debloat.ps1`, `Detect-Drift.ps1`, `Remediate-Drift.ps1`, and `Debloat-Win11-Maintain.ps1` share the same `-OutputFormat Text|Json|Csv` contract; JSON includes a schema/status/summary object and non-success states return exit 1.
 - WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
 - The Windows integration harness is skipped unless `DEBLOAT_WIN11_INTEGRATION_VM=1` and `-AllowMutation` are supplied on a disposable elevated VM; failed runs preserve artifacts.
 - `tools\Export-PolicyArtifacts.ps1` emits catalog-backed OMA-URI/GPO JSON with build, edition, architecture, preview, and applicability metadata; it does not invent PFNs from wildcard removal patterns.
@@ -307,6 +308,12 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 # Check for drifted settings (reset by Windows Update)
 .\Debloat-Win11.ps1 -CheckDrift
+
+# Stable machine-readable deployment output
+.\Detect-Debloat.ps1 -OutputFormat Json
+.\Detect-Drift.ps1 -OutputFormat Json
+.\Remediate-Drift.ps1 -OutputFormat Json
+.\Debloat-Win11-Maintain.ps1 -OutputFormat Csv
 
 # Apply HKCU tweaks to all user profiles (for SYSTEM-level deployment)
 .\Debloat-Win11.ps1 -AllUsers

@@ -926,6 +926,39 @@ Describe 'Multi-user Drift Contract' {
     }
 }
 
+Describe 'Stable Noninteractive Output Contracts' {
+    BeforeAll {
+        $driftDetectContent = Get-Content (Join-Path $repoRoot 'Detect-Drift.ps1') -Raw
+        $driftRemediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
+        $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
+        $complianceContent = Get-Content (Join-Path $repoRoot 'Detect-Debloat.ps1') -Raw
+    }
+
+    It 'declares Text, Json, and Csv modes for all deployment entry points' {
+        foreach ($content in @($scriptContent, $complianceContent, $driftDetectContent, $driftRemediateContent, $maintainContent)) {
+            $content | Should -Match "ValidateSet\('Text','Json','Csv'\)"
+            $content | Should -Match 'ConvertTo-Json'
+            $content | Should -Match 'ConvertTo-Csv'
+        }
+    }
+
+    It 'uses stable schema/status/summary keys in drift and maintenance outputs' {
+        foreach ($content in @($complianceContent, $driftDetectContent, $driftRemediateContent, $maintainContent)) {
+            $content | Should -Match 'schema_version'
+            $content | Should -Match 'status'
+        }
+        $driftDetectContent | Should -Match 'summary = \[ordered\]@'
+        $driftRemediateContent | Should -Match 'summary = \[ordered\]@'
+        $maintainContent | Should -Match 'maintenanceResult = \[ordered\]@'
+    }
+
+    It 'keeps redirected output free of explicit color/ANSI sequences' {
+        $driftDetectContent | Should -Not -Match 'Write-Host|`e\['
+        $driftRemediateContent | Should -Not -Match 'Write-Host|`e\['
+        $maintainContent | Should -Not -Match 'Write-Host|`e\['
+    }
+}
+
 Describe 'Typed HKCU Propagation' {
     BeforeAll {
         $hkcuContent = Get-Content (Join-Path $repoRoot 'Modules\PolicyCatalog.psd1') -Raw

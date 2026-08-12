@@ -8,6 +8,12 @@
 #   Remediation script: Remediate-Drift.ps1
 #   Run as: System
 
+[CmdletBinding()]
+param(
+    [ValidateSet('Text','Json','Csv')]
+    [string]$OutputFormat = 'Text'
+)
+
 $ErrorActionPreference = 'SilentlyContinue'
 $scriptRoot = Split-Path $MyInvocation.MyCommand.Path -Parent
 $policyCatalogFile = Join-Path $scriptRoot 'Modules\PolicyCatalog.psd1'
@@ -22,7 +28,14 @@ try {
     if (-not (Test-Path $profileHelperFile)) { throw "Profile helper not found: $profileHelperFile" }
     . $profileHelperFile
 } catch {
-    Write-Output "Debloat-Win11: status=Error reason=$($_.Exception.Message)"
+    $errorMessage = $_.Exception.Message
+    if ($OutputFormat -eq 'Json') {
+        Write-Output ([ordered]@{ schema_version = 1; status = 'Error'; reasons = @($errorMessage) } | ConvertTo-Json -Compress)
+    } elseif ($OutputFormat -eq 'Csv') {
+        Write-Output (([ordered]@{ status = 'Error'; reason = $errorMessage } | ConvertTo-Csv -NoTypeInformation) -join "`n")
+    } else {
+        Write-Output "Debloat-Win11: status=Error reason=$errorMessage"
+    }
     exit 1
 }
 
@@ -147,10 +160,38 @@ foreach ($userProfile in $userProfiles) {
 }
 
 $status = if ($summary.Failed -eq 0 -and $summary.Errors -eq 0 -and $summary.Skipped -eq 0) { 'Success' } else { 'Incomplete' }
-foreach ($detail in $details) {
-    Write-Output ("Debloat-Win11: scope={0} profile={1} status={2} path={3} name={4} reason={5}" -f $detail.Scope, $detail.Profile, $detail.Status, $detail.Path, $detail.Name, $detail.Reason)
+$result = [ordered]@{
+    schema_version = 1
+    product = 'Debloat-Win11'
+    status = $status
+    catalog_version = [string]$policyCatalog.CatalogVersion
+    output_format = $OutputFormat
+    summary = [ordered]@{
+        attempted = $summary.Attempted
+        remediated = $summary.Remediated
+        already_compliant = $summary.AlreadyCompliant
+        failed = $summary.Failed
+        skipped = $summary.Skipped
+        errors = $summary.Errors
+        profiles = $summary.Profiles
+        loaded_profiles = $summary.LoadedProfiles
+        offline_profiles = $summary.OfflineProfiles
+        skipped_profiles = $summary.SkippedProfiles
+    }
+    details = @($details)
 }
-Write-Output ("Debloat-Win11: status={0} attempted={1} remediated={2} alreadyCompliant={3} failed={4} skipped={5} errors={6} profiles={7} loaded={8} offline={9} skippedProfiles={10}" -f $status, $summary.Attempted, $summary.Remediated, $summary.AlreadyCompliant, $summary.Failed, $summary.Skipped, $summary.Errors, $summary.Profiles, $summary.LoadedProfiles, $summary.OfflineProfiles, $summary.SkippedProfiles)
+if ($OutputFormat -eq 'Json') {
+    Write-Output ($result | ConvertTo-Json -Depth 8 -Compress)
+} elseif ($OutputFormat -eq 'Csv') {
+    $csv = [ordered]@{ product = $result.product; status = $result.status; catalog_version = $result.catalog_version }
+    foreach ($key in $result.summary.Keys) { $csv[$key] = $result.summary[$key] }
+    Write-Output (($csv | ConvertTo-Csv -NoTypeInformation) -join "`n")
+} else {
+    foreach ($detail in $details) {
+        Write-Output ("Debloat-Win11: scope={0} profile={1} status={2} path={3} name={4} reason={5}" -f $detail.Scope, $detail.Profile, $detail.Status, $detail.Path, $detail.Name, $detail.Reason)
+    }
+    Write-Output ("Debloat-Win11: status={0} attempted={1} remediated={2} alreadyCompliant={3} failed={4} skipped={5} errors={6} profiles={7} loaded={8} offline={9} skippedProfiles={10}" -f $status, $summary.Attempted, $summary.Remediated, $summary.AlreadyCompliant, $summary.Failed, $summary.Skipped, $summary.Errors, $summary.Profiles, $summary.LoadedProfiles, $summary.OfflineProfiles, $summary.SkippedProfiles)
+}
 
 if ($status -eq 'Success') { exit 0 }
 exit 1

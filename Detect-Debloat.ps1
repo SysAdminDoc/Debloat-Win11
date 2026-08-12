@@ -10,7 +10,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Text','Json')]
+    [ValidateSet('Text','Json','Csv')]
     [string]$OutputFormat = 'Text',
     [ValidateSet('CurrentUser','AllUsers')]
     [string]$ExpectedScope,
@@ -114,6 +114,15 @@ function Finish-Compliance {
     }
     if ($OutputFormat -eq 'Json') {
         Write-Output ($result | ConvertTo-Json -Depth 6 -Compress)
+    } elseif ($OutputFormat -eq 'Csv') {
+        $csv = [ordered]@{
+            product = $result.product
+            expected_version = $result.expected_version
+            compliant = $result.compliant
+            source = $result.source
+            reasons = (@($result.reasons) -join ' | ')
+        }
+        Write-Output (($csv | ConvertTo-Csv -NoTypeInformation) -join "`n")
     } elseif ($Compliant) {
         Write-Output "Debloat-Win11 $expectedVersion detected ($Source)"
     } else {
