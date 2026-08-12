@@ -1163,9 +1163,23 @@ EdgeBookmarks = @(
 
 ### Local Validation
 ```powershell
-Invoke-Pester .\tests\
+# Common matrix runner: Pester 5.9.0 on Windows PowerShell 5.1 or PowerShell 7
+.\tools\Invoke-TestSuite.ps1
+
+# Optional PowerShell 7 compatibility check with Pester 6.0.1
+pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 6.0.1; Invoke-Pester .\tests\ -Output Normal"
 .\tools\Invoke-StaticAnalysis.ps1
 ```
+
+Supported test matrix:
+
+| Shell | Pester | Contract |
+|-------|--------|----------|
+| Windows PowerShell 5.1 | 5.9.0 | Required pass |
+| PowerShell 7 | 5.9.0 | Required pass |
+| PowerShell 7 | 6.0.1 | Compatibility pass |
+
+The runner validates that the requested Pester version is already installed and never installs modules implicitly. Pester 5.9.0 is the common release used across both supported shells; Pester 6 is validated on PowerShell 7 only.
 
 ### Clearing Event Logs
 

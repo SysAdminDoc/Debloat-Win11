@@ -201,6 +201,18 @@ Describe 'Verified Operation Contract' {
         $testsContent | Should -Not -Match 'Assert-MockCalled\s+\w+\s+-Times'
         $testsContent | Should -Match 'Should -Invoke'
     }
+
+    It 'provides a version-checked test runner and documents the matrix' {
+        $runnerContent = Get-Content (Join-Path $repoRoot 'tools\Invoke-TestSuite.ps1') -Raw
+        $runnerContent | Should -Match 'PesterVersion'
+        $runnerContent | Should -Match 'Get-Module -ListAvailable -Name Pester'
+        $runnerContent | Should -Match 'Install-Module Pester -RequiredVersion'
+        $runnerContent | Should -Match 'FailedCount'
+        $readmeContent = Get-Content (Join-Path $repoRoot 'README.md') -Raw
+        $readmeContent | Should -Match 'Windows PowerShell 5\.1'
+        $readmeContent | Should -Match 'Pester 5\.9\.0'
+        $readmeContent | Should -Match 'Pester 6\.0\.1'
+    }
 }
 
 Describe 'DryRun Guards' {
