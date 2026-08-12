@@ -2,13 +2,17 @@
 
 [CmdletBinding()]
 param(
-    [string]$BaselinePath = (Join-Path $PSScriptRoot 'StaticAnalysisBaseline.json'),
+    [string]$BaselinePath,
     [int]$MaxWarnings = -1,
     [int]$MaxErrors = 0,
     [switch]$Json
  )
 
 $ErrorActionPreference = 'Stop'
+
+if ([string]::IsNullOrWhiteSpace($BaselinePath)) {
+    $BaselinePath = Join-Path $PSScriptRoot 'StaticAnalysisBaseline.json'
+}
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $settingsPath = Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1'
