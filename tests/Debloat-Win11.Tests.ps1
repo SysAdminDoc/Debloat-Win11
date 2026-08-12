@@ -235,6 +235,34 @@ Describe 'Verified Operation Contract' {
         $readmeContent | Should -Match 'Pester 5\.9\.0'
         $readmeContent | Should -Match 'Pester 6\.0\.1'
     }
+
+    It 'declares offline runtime/module requirements and does not install dependencies' {
+        $requirementsPath = Join-Path $repoRoot 'tools\ValidationRequirements.psd1'
+        $requirementsContent = Get-Content $requirementsPath -Raw
+        $requirements = Import-PowerShellDataFile -LiteralPath $requirementsPath
+        $environmentContent = Get-Content (Join-Path $repoRoot 'tools\Get-ValidationEnvironment.ps1') -Raw
+        $pesterRequirement = @($requirements.Modules | Where-Object Name -eq 'Pester')[0]
+        $analyzerRequirement = @($requirements.Modules | Where-Object Name -eq 'PSScriptAnalyzer')[0]
+        $requirements.SchemaVersion | Should -Be 1
+        @($requirements.TestMatrix).Count | Should -Be 3
+        $pesterRequirement.AllowedVersions | Should -Contain '5.9.0'
+        $analyzerRequirement.AllowedVersions | Should -Contain '1.25.0'
+        $environmentContent | Should -Match 'Get-FileHash'
+        $environmentContent | Should -Match 'installs_performed = \$false'
+        $environmentContent | Should -Not -Match 'Install-Module|Save-Module|Invoke-WebRequest|Invoke-RestMethod'
+        $requirementsContent | Should -Not -Match 'https?://.*Install'
+    }
+
+    It 'reports the local environment as JSON and validates the declared modules' {
+        $environmentScript = Join-Path $repoRoot 'tools\Get-ValidationEnvironment.ps1'
+        $environment = (& $environmentScript -Json | ConvertFrom-Json)
+        $environment.offline | Should -Be $true
+        $environment.installs_performed | Should -Be $false
+        $environment.runtime.supported | Should -Be $true
+        $environment.requirements_valid | Should -Be $true
+        ($environment.modules | Where-Object Name -eq 'Pester').compatible_versions.Count | Should -BeGreaterThan 0
+        ($environment.modules | Where-Object Name -eq 'PSScriptAnalyzer').compatible_versions | Should -Contain '1.25.0'
+    }
 }
 
 Describe 'DryRun Guards' {

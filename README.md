@@ -1207,6 +1207,9 @@ pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 6.0.1; Invoke-Pe
 # Emit the analyzer budget/result as one JSON object
 .\tools\Invoke-StaticAnalysis.ps1 -Json
 
+# Report exact local runtime/tool versions and module manifest hashes offline
+.\tools\Get-ValidationEnvironment.ps1 -Json
+
 # Disposable-VM integration path (explicitly skipped on ordinary machines)
 .\tools\Invoke-WindowsIntegrationTests.ps1
 
@@ -1222,7 +1225,7 @@ Supported test matrix:
 | PowerShell 7 | 5.9.0 | Required pass |
 | PowerShell 7 | 6.0.1 | Compatibility pass |
 
-The runner validates that the requested Pester version is already installed and never installs modules implicitly. Pester 5.9.0 is the common release used across both supported shells; Pester 6 is validated on PowerShell 7 only.
+The runner validates that the requested Pester version is already installed and never installs modules implicitly. `tools\ValidationRequirements.psd1` is the source of truth: Pester 5.9.0 is supported on both shells, Pester 6.0.1 is supported on PowerShell 7, and PSScriptAnalyzer 1.25.0 is required for the static gate. `Get-ValidationEnvironment.ps1` only reads installed modules and computes SHA-256 hashes of compatible module manifests; it never installs or downloads dependencies. Use `-Strict` for a non-zero result when a declared requirement is missing.
 
 ### Clearing Event Logs
 
