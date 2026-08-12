@@ -52,6 +52,14 @@ if ($script:policyCatalog.SchemaVersion -ne 1 -or [string]::IsNullOrWhiteSpace([
     Write-Host "ERROR: Policy catalog schema/version is unsupported: $($script:policyCatalog.SchemaVersion)/$($script:policyCatalog.CatalogVersion)" -ForegroundColor Red
     exit 2
 }
+$script:profileHelperFile = Join-Path $PSScriptRoot 'tools\ProfileHive.ps1'
+try {
+    if (-not (Test-Path $script:profileHelperFile)) { throw "Profile helper not found: $script:profileHelperFile" }
+    . $script:profileHelperFile
+} catch {
+    Write-Host "ERROR: Profile helper failed to load: $($_.Exception.Message)" -ForegroundColor Red
+    exit 2
+}
 $script:windowsAiPolicies = @($script:policyCatalog.Policies)
 $script:hkcuTweaks = @($script:policyCatalog.HkcuTweaks)
 $catalogErrors = [System.Collections.ArrayList]@()
@@ -195,7 +203,7 @@ if ($UndoFile) {
             # Restore old value
             if (!(Test-Path $entry.path)) { New-Item -Path $entry.path -Force | Out-Null }
             $type = if ($entry.type) { $entry.type } else { 'DWord' }
-            Set-ItemProperty -Path $entry.path -Name $entry.name -Value $entry.old_value -Type $type -Force -ErrorAction SilentlyContinue
+            Set-DebloatRegistryProperty -Path $entry.path -Name $entry.name -Value $entry.old_value -Type $type -ErrorAction SilentlyContinue
             $undoneReg++
         }
     }
@@ -973,7 +981,7 @@ function Set-Reg {
 
     try {
         if (!(Test-Path $Path)) { New-Item -Path $Path -Force -EA Stop | Out-Null }
-        Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force -EA Stop
+        Set-DebloatRegistryProperty -Path $Path -Name $Name -Value $Value -Type $Type -EA Stop
         $current = Get-ItemProperty -Path $Path -Name $Name -EA Stop
         if ($current.$Name -ne $Value) { throw "Registry verification returned '$($current.$Name)' instead of '$Value'" }
         Register-OperationResult -Name "$Path\$Name" -Action 'Set registry value' -Scope $(if ([string]$Path -like 'HKCU:*') { 'CurrentUser' } else { 'Machine' }) -Status 'Succeeded'
@@ -1809,13 +1817,13 @@ if ($DryRun) {
         $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
         if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force -EA Stop | Out-Null }
         if ($stampStatus -eq 'Complete') {
-            Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -Force -EA Stop
-            Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Complete" -Type String -Force -EA Stop
-            Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA Stop
+            Set-DebloatRegistryProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -EA Stop
+            Set-DebloatRegistryProperty -Path $regStampPath -Name "Status" -Value "Complete" -Type String -EA Stop
+            Set-DebloatRegistryProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -EA Stop
         } else {
-            Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Incomplete" -Type String -Force -EA Stop
+            Set-DebloatRegistryProperty -Path $regStampPath -Name "Status" -Value "Incomplete" -Type String -EA Stop
         }
-        Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA Stop
+        Set-DebloatRegistryProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -EA Stop
     } -Verification {
         $stamp = Get-ItemProperty -Path "HKLM:\SOFTWARE\Debloat-Win11" -EA Stop
         $stamp.Status -eq $stampStatus
@@ -1867,7 +1875,7 @@ try {
             $type = if ($entry.type) { $entry.type } else { 'DWord' }
             $escapedValue = if ($type -eq 'String') { "'$($entry.old_value -replace "'","''")'" } else { $entry.old_value }
             $revertLines.Add("if (!(Test-Path '$escapedPath')) { New-Item -Path '$escapedPath' -Force | Out-Null }") | Out-Null
-            $revertLines.Add("Set-ItemProperty -Path '$escapedPath' -Name '$escapedName' -Value $escapedValue -Type $type -Force -EA 0") | Out-Null
+            $revertLines.Add("New-ItemProperty -Path '$escapedPath' -Name '$escapedName' -Value $escapedValue -PropertyType $type -Force -EA 0 | Out-Null") | Out-Null
         }
     }
     $revertLines.Add('') | Out-Null

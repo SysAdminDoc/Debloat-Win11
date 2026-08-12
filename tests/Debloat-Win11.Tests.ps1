@@ -751,24 +751,64 @@ Describe 'Logged-in HKCU Propagation' {
     BeforeAll {
         $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
         $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
+        $profileHelperContent = Get-Content (Join-Path $repoRoot 'tools\ProfileHive.ps1') -Raw
     }
 
     It 'resolves loaded profile hives through Win32_UserProfile and HKEY_USERS' {
-        foreach ($content in @($maintainContent, $remediateContent)) {
-            $content | Should -Match 'Get-CimInstance -ClassName Win32_UserProfile'
-            $content | Should -Match 'Registry::HKEY_USERS'
-            $content | Should -Match '\$loadedHivePath'
-        }
+        $profileHelperContent | Should -Match 'Get-CimInstance -ClassName Win32_UserProfile'
+        $profileHelperContent | Should -Match 'Registry::HKEY_USERS'
+        $profileHelperContent | Should -Match 'Get-DebloatLoadedUserHivePath'
     }
 
     It 'handles loaded profiles before attempting temporary hive loads' {
-        foreach ($content in @($maintainContent, $remediateContent)) {
-            $loadedIndex = $content.IndexOf('$loadedHivePath')
-            $loadIndex = $content.IndexOf('reg load')
-            $loadedIndex | Should -BeGreaterOrEqual 0
-            $loadIndex | Should -BeGreaterThan $loadedIndex
-            $content | Should -Match '\$loadedHivePath\)\s*\{[\s\S]*?continue'
-        }
+        $loadedIndex = $profileHelperContent.IndexOf('Get-DebloatLoadedUserHivePath')
+        $loadIndex = $profileHelperContent.IndexOf('reg load')
+        $loadedIndex | Should -BeGreaterOrEqual 0
+        $loadIndex | Should -BeGreaterThan $loadedIndex
+        $maintainContent | Should -Match 'ProfileHive\.ps1'
+        $remediateContent | Should -Match 'ProfileHive\.ps1'
+    }
+}
+
+Describe 'Multi-user Drift Contract' {
+    BeforeAll {
+        $profileHelperContent = Get-Content (Join-Path $repoRoot 'tools\ProfileHive.ps1') -Raw
+        $detectContent = Get-Content (Join-Path $repoRoot 'Detect-Drift.ps1') -Raw
+        $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
+    }
+
+    It 'enumerates both loaded and offline profiles through one helper' {
+        $profileHelperContent | Should -Match 'Win32_UserProfile'
+        $profileHelperContent | Should -Match 'ProfileList'
+        $profileHelperContent | Should -Match 'Open-DebloatUserHive'
+        $profileHelperContent | Should -Match 'Temporary = \$true'
+        $detectContent | Should -Match 'foreach \(\$userProfile in \$userProfiles\)'
+        $remediateContent | Should -Match 'foreach \(\$userProfile in \$userProfiles\)'
+    }
+
+    It 'deduplicates user policy and HKCU checks before counting settings' {
+        $catalog = Import-PowerShellDataFile -Path (Join-Path $repoRoot 'Modules\PolicyCatalog.psd1')
+        . (Join-Path $repoRoot 'tools\ProfileHive.ps1')
+        $checks = @(Get-DebloatUserRegistryChecks -Policies @($catalog.Policies) -Tweaks @($catalog.HkcuTweaks))
+        $keys = @($checks | ForEach-Object { "$($_.Path)|$($_.Name)" })
+        @($keys | Group-Object | Where-Object Count -gt 1).Count | Should -Be 0
+        $checks.Count | Should -Be 47
+    }
+
+    It 'reports per-setting detection and remediation outcomes' {
+        $detectContent | Should -Match 'checks=.*compliant=.*drifted=.*skipped=.*errors='
+        $remediateContent | Should -Match 'attempted=.*remediated=.*alreadyCompliant=.*failed=.*skipped='
+        $remediateContent | Should -Match '\$summary\.Skipped \+= \$userChecks\.Count'
+        $remediateContent | Should -Not -Match '\$count\+\+'
+    }
+
+    It 'treats profile load and unload failures as visible non-success' {
+        $profileHelperContent | Should -Match 'reg load failed with exit code'
+        $profileHelperContent | Should -Match 'reg unload failed with exit code'
+        $profileHelperContent | Should -Match 'New-ItemProperty[\s\S]*PropertyType'
+        $profileHelperContent | Should -Not -Match 'Set-ItemProperty[\s\S]*-Type'
+        $detectContent | Should -Match 'status = if \(\$summary\.Drifted -eq 0 -and \$summary\.Errors -eq 0 -and \$summary\.Skipped -eq 0\)'
+        $remediateContent | Should -Match 'status = if \(\$summary\.Failed -eq 0 -and \$summary\.Errors -eq 0 -and \$summary\.Skipped -eq 0\)'
     }
 }
 
@@ -778,19 +818,22 @@ Describe 'Typed HKCU Propagation' {
         $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
         $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
         $systemTweaksContent = Get-Content (Join-Path $repoRoot 'Modules\SystemTweaks_System.ps1') -Raw
+        $profileHelperContent = Get-Content (Join-Path $repoRoot 'tools\ProfileHive.ps1') -Raw
         $allUsersBlock = [regex]::Match($systemTweaksContent, '# ALL-USERS HKCU PROPAGATION[\s\S]*').Value
     }
 
     It 'supports optional shared tweak Type metadata with a DWord fallback' {
         $hkcuContent | Should -Match 'Type is optional'
         $maintainContent | Should -Match 'ContainsKey\(''Type''\)'
-        $remediateContent | Should -Match 'ContainsKey\(''Type''\)'
+        $profileHelperContent | Should -Match '\$tweak\.Type.*DWord'
         $allUsersBlock | Should -Match 'ContainsKey\(''Type''\)'
     }
 
     It 'applies the resolved type through the registry provider' {
+        $maintainContent | Should -Match '-Type \$tweakType'
+        $remediateContent | Should -Match '-Type \$check\.Type'
+        $allUsersBlock | Should -Match '-Type \$tweakType'
         foreach ($content in @($maintainContent, $remediateContent, $allUsersBlock)) {
-            $content | Should -Match '-Type \$tweakType'
             $content | Should -Not -Match 'reg add[\s\S]*REG_DWORD'
         }
     }

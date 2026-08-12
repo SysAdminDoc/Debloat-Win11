@@ -247,8 +247,7 @@ if ($AllUsers -and -not $DryRun) {
         foreach ($tweak in $hkcuTweaks) {
             $tweakType = if ($tweak.ContainsKey('Type') -and $tweak.Type) { [string]$tweak.Type } else { 'DWord' }
             $regPath = "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)"
-            if (!(Test-Path $regPath)) { New-Item -Path $regPath -Force -EA Stop | Out-Null }
-            Set-ItemProperty -Path $regPath -Name $tweak.Name -Value $tweak.Value -Type $tweakType -Force -EA Stop
+            Set-DebloatRegistryProperty -Path $regPath -Name $tweak.Name -Value $tweak.Value -Type $tweakType -EA Stop
         }
         [gc]::Collect()
         Start-Sleep -Milliseconds 200

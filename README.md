@@ -66,6 +66,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Manifests record planned, succeeded, failed, and skipped operation results and are marked incomplete when a mutation fails.
 - Network defaults preserve the current profile and do not enable discovery, file sharing, or LLMNR on Public networks.
 - Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
+- Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
 
 ### New in v2.3.9
 - Lockfile now detects stale PIDs from crashed runs instead of permanently blocking

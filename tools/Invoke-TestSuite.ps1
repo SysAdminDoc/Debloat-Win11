@@ -3,8 +3,12 @@
 [CmdletBinding()]
 param(
     [string]$PesterVersion = '5.9.0',
-    [string]$TestPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'tests')
+    [string]$TestPath
 )
+
+if ([string]::IsNullOrWhiteSpace($TestPath)) {
+    $TestPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'tests'
+}
 
 $available = @(Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -eq [version]$PesterVersion })
 if ($available.Count -eq 0) {

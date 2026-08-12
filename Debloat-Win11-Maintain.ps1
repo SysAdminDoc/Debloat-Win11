@@ -31,7 +31,7 @@ function Set-RegMaintain {
     if (!(Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
     $current = Get-ItemProperty -Path $Path -Name $Name -EA 0
     if ($null -eq $current -or $current.$Name -ne $Value) {
-        Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force -EA 0
+        Set-DebloatRegistryProperty -Path $Path -Name $Name -Value $Value -Type $Type -EA Stop
         Write-MaintainLog "  Reset: $Path\$Name = $Value"
         $script:count++
     }
@@ -40,6 +40,8 @@ function Set-RegMaintain {
 $policyCatalogFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Modules\PolicyCatalog.psd1'
 $policyCatalog = if (Test-Path $policyCatalogFile) { Import-PowerShellDataFile -Path $policyCatalogFile } else { @{} }
 $windowsAiPolicies = @($policyCatalog.Policies)
+$profileHelperFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'tools\ProfileHive.ps1'
+if (Test-Path $profileHelperFile) { . $profileHelperFile }
 
 # ============================================================================
 # HKLM POLICIES (machine-wide, work regardless of which user is logged in)
@@ -80,86 +82,62 @@ function Get-HkcuTweakType {
     return 'DWord'
 }
 
-function Get-LoadedUserHivePath {
-    param([Parameter(Mandatory)][string]$ProfilePath)
-
-    $normalizedProfilePath = $ProfilePath.TrimEnd('\')
-    $profileRecord = Get-CimInstance -ClassName Win32_UserProfile -EA 0 |
-        Where-Object {
-            $_.Loaded -and $_.SID -and $_.LocalPath -and
-            ($_.LocalPath.TrimEnd('\') -ieq $normalizedProfilePath)
-        } | Select-Object -First 1
-
-    if ($profileRecord) {
-        $hivePath = "Registry::HKEY_USERS\$($profileRecord.SID)"
-        if (Test-Path $hivePath) { return $hivePath }
-    }
-
-    # Fall back to the loaded HKU hives when WMI does not report the profile.
-    foreach ($hive in @(Get-ChildItem 'Registry::HKEY_USERS' -EA 0 | Where-Object { $_.PSChildName -match '^S-1-5-21-\d+-\d+-\d+-\d+$' })) {
-        $profileList = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($hive.PSChildName)" -Name ProfileImagePath -EA 0
-        if ($profileList) {
-            $imagePath = [Environment]::ExpandEnvironmentVariables([string]$profileList.ProfileImagePath).TrimEnd('\')
-            if ($imagePath -ieq $normalizedProfilePath) {
-                return "Registry::HKEY_USERS\$($hive.PSChildName)"
-            }
-        }
-    }
-
-    return $null
-}
-
 # Apply to all user profile NTUSER.DAT files (covers users not currently logged in)
-$userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default User|All Users)$' }
+$profileEnumerationError = $null
+$userProfiles = @(Get-DebloatUserProfiles -ErrorMessage ([ref]$profileEnumerationError))
+if ($profileEnumerationError) { Write-MaintainLog "  WARNING: $profileEnumerationError" }
+$skippedProfiles = 0
 foreach ($userProf in $userProfiles) {
-    $ntuser = "$($userProf.FullName)\NTUSER.DAT"
-    if (!(Test-Path $ntuser)) { continue }
-
-    $loadedHivePath = Get-LoadedUserHivePath -ProfilePath $userProf.FullName
-    if ($loadedHivePath) {
-        foreach ($tweak in $hkcuTweaks) {
-            $tweakType = Get-HkcuTweakType -Tweak $tweak
-            Set-RegMaintain -Path "$loadedHivePath\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
-        }
-        Write-MaintainLog "  Applied tweaks to logged-in profile: $($userProf.Name)"
+    $session = Open-DebloatUserHive -UserProfile $userProf -Prefix 'DebloatMaintain'
+    if ($session.Status -ne 'Ready') {
+        $skippedProfiles++
+        Write-MaintainLog "  SKIPPED profile $($userProf.Name): $($session.Reason)"
         continue
     }
-
-    $hiveKey = "Maintain_$($userProf.Name -replace '[^a-zA-Z0-9]','_')"
-    $hiveName = "HKU\$hiveKey"
-    reg load $hiveName $ntuser 2>$null
-    if ($LASTEXITCODE -ne 0) { continue }
-
     foreach ($tweak in $hkcuTweaks) {
         $tweakType = Get-HkcuTweakType -Tweak $tweak
-        Set-RegMaintain -Path "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
+        Set-RegMaintain -Path "$($session.Path)\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
     }
-
-    [gc]::Collect()
-    Start-Sleep -Milliseconds 200
-    reg unload $hiveName 2>$null
-    Write-MaintainLog "  Applied tweaks to profile: $($userProf.Name)"
+    $closeResult = Close-DebloatUserHive -Session $session
+    if (-not $closeResult.Success) {
+        $skippedProfiles++
+        Write-MaintainLog "  WARNING: Could not close profile $($userProf.Name): $($closeResult.Reason)"
+    } else {
+        $profileType = if ($session.Temporary) { 'offline' } else { 'logged-in' }
+        Write-MaintainLog "  Applied tweaks to $profileType profile: $($userProf.Name)"
+    }
 }
 
 # Also apply to Default profile (new user accounts)
 $defaultHive = "C:\Users\Default\NTUSER.DAT"
 if (Test-Path $defaultHive) {
-    $hiveKey = 'Maintain_Default'
-    $hiveName = "HKU\$hiveKey"
-    reg load $hiveName $defaultHive 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $defaultProfile = [pscustomobject]@{
+        Name = 'Default'
+        SID = $null
+        LocalPath = 'C:\Users\Default'
+        NtUserPath = $defaultHive
+        Loaded = $false
+    }
+    $session = Open-DebloatUserHive -UserProfile $defaultProfile -Prefix 'DebloatMaintain'
+    if ($session.Status -eq 'Ready') {
         foreach ($tweak in $hkcuTweaks) {
             $tweakType = Get-HkcuTweakType -Tweak $tweak
-            Set-RegMaintain -Path "Registry::HKEY_USERS\$hiveKey\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
+            Set-RegMaintain -Path "$($session.Path)\$($tweak.Path)" -Name $tweak.Name -Value $tweak.Value -Type $tweakType
         }
-        [gc]::Collect()
-        Start-Sleep -Milliseconds 200
-        reg unload $hiveName 2>$null
-        Write-MaintainLog "  Applied tweaks to Default profile"
+        $closeResult = Close-DebloatUserHive -Session $session
+        if (-not $closeResult.Success) {
+            $skippedProfiles++
+            Write-MaintainLog "  WARNING: Could not close Default profile: $($closeResult.Reason)"
+        } else {
+            Write-MaintainLog "  Applied tweaks to Default profile"
+        }
+    } else {
+        $skippedProfiles++
+        Write-MaintainLog "  SKIPPED Default profile: $($session.Reason)"
     }
 }
 
-Write-MaintainLog "=== MAINTENANCE COMPLETE: $count settings re-applied ==="
+Write-MaintainLog "=== MAINTENANCE COMPLETE: $count settings re-applied; $skippedProfiles profiles skipped ==="
 
-$msg = "Debloat-Win11 maintenance: $count registry settings re-applied after Windows Update"
+$msg = "Debloat-Win11 maintenance: $count registry settings re-applied; $skippedProfiles profiles skipped after Windows Update"
 Write-EventLog -LogName 'Application' -Source $eventSource -EventId 1002 -EntryType Information -Message $msg -EA 0
