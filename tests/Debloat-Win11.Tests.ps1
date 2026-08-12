@@ -1099,6 +1099,39 @@ Describe 'Deterministic WinGet Operations' {
     }
 }
 
+Describe 'Policy Delivery Artifact Export' {
+    BeforeAll {
+        $exportPolicyScript = Join-Path $repoRoot 'tools\Export-PolicyArtifacts.ps1'
+    }
+
+    It 'emits documented OMA-URI/GPO mappings with applicability metadata' {
+        $content = Get-Content $exportPolicyScript -Raw
+        $content | Should -Match 'Vendor/MSFT/Policy/Config'
+        $content | Should -Match 'RemoveDefaultMicrosoftStorePackages'
+        $content | Should -Match 'SupportedEditions'
+        $content | Should -Match 'PreviewOnly'
+        $content | Should -Match 'Do not configure both'
+        $content | Should -Match 'catalog_selection'
+    }
+
+    It 'produces different Pro and Enterprise 24H2 applicability results' {
+        $pro = (& $exportPolicyScript -Edition Pro -Build 26100 | ConvertFrom-Json)
+        $enterprise = (& $exportPolicyScript -Edition Enterprise -Build 26100 | ConvertFrom-Json)
+
+        $pro.inbox_app_removal.status | Should -Be 'NotApplicable'
+        $enterprise.inbox_app_removal.status | Should -Be 'Ready'
+        $enterprise.inbox_app_removal.oma_uri | Should -Be './Device/Vendor/MSFT/Policy/Config/ApplicationManagement/RemoveDefaultMicrosoftStorePackages'
+        ($pro.policies | Where-Object { $_.name -eq 'DisableAIDataAnalysis' -and $_.scope -eq 'Device' }).status | Should -Be 'Ready'
+        ($enterprise.policies | Where-Object { $_.name -eq 'DisableSettingsAgent' -and $_.scope -eq 'Device' }).preview_only | Should -Be $true
+    }
+
+    It 'refuses to turn wildcard removal patterns into package family names' {
+        $enterprise = (& $exportPolicyScript -Edition Enterprise -Build 26100 | ConvertFrom-Json)
+        $enterprise.inbox_app_removal.catalog_selection | Should -Match 'wildcard'
+        @($enterprise.inbox_app_removal.dynamic_removal_list).Count | Should -Be 0
+    }
+}
+
 Describe 'Destructive Operation Behavior Mocks' {
     BeforeAll {
         function Mount-WindowsImage {

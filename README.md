@@ -72,6 +72,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Each run emits correlation-linked JSON summary and manifest artifacts, includes every tracked/package operation and rollback limitation, retains only the newest 50 artifacts per type, and supports `-OutputFormat Text|Json|Csv` for noninteractive callers.
 - WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
 - The Windows integration harness is skipped unless `DEBLOAT_WIN11_INTEGRATION_VM=1` and `-AllowMutation` are supplied on a disposable elevated VM; failed runs preserve artifacts.
+- `tools\Export-PolicyArtifacts.ps1` emits catalog-backed OMA-URI/GPO JSON with build, edition, architecture, preview, and applicability metadata; it does not invent PFNs from wildcard removal patterns.
 
 ### New in v2.3.9
 - Lockfile now detects stale PIDs from crashed runs instead of permanently blocking
@@ -1104,6 +1105,14 @@ switch ($result.ExitCode) {
 4. Requirements: Windows 10 1903+
 5. For policy-based inbox app removal, use either the logged `DynamicRemovalList` OMA-URI payload or local GPO-compatible registry delivery, not both on the same device.
 
+Generate a reviewed policy-delivery artifact for a target fleet:
+
+```powershell
+.\tools\Export-PolicyArtifacts.ps1 -Edition Enterprise -Build 26100 -Architecture x64 -OutputPath .\policy-artifacts\enterprise-24H2.json
+```
+
+The artifact contains Microsoft-documented WindowsAI OMA-URI values, GPO registry mappings where an ADMX mapping exists, explicit `NotApplicable`/`Unsupported` records, and a warning to choose one management channel. Preview-only WindowsAI policies remain visibly marked for live validation.
+
 ### SCCM/ConfigMgr
 
 1. Create Package with source files
@@ -1200,6 +1209,9 @@ pwsh -NoProfile -Command "Import-Module Pester -RequiredVersion 6.0.1; Invoke-Pe
 
 # Disposable-VM integration path (explicitly skipped on ordinary machines)
 .\tools\Invoke-WindowsIntegrationTests.ps1
+
+# Generate edition-aware Intune/GPO policy delivery JSON
+.\tools\Export-PolicyArtifacts.ps1 -Edition Enterprise -Build 26100 -Architecture x64
 ```
 
 Supported test matrix:

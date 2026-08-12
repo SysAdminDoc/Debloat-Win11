@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 
- [CmdletBinding()]
- param(
+[CmdletBinding()]
+param(
     [string]$BaselinePath = (Join-Path $PSScriptRoot 'StaticAnalysisBaseline.json'),
     [int]$MaxWarnings = -1,
     [int]$MaxErrors = 0,

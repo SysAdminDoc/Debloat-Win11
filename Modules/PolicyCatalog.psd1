@@ -19,9 +19,9 @@
         @{ Scope = 'User'; Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'DisableRecallDataProviders'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
         @{ Scope = 'Device'; Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsAI'; Name = 'AllowRecallExport'; Value = 0; Type = 'DWord'; ApplyByDefault = $true }
         @{ Scope = 'User'; Path = 'SOFTWARE\Policies\Microsoft\Windows\CopilotKey'; Name = 'SetCopilotHardwareKey'; Value = ''; Type = 'String'; ApplyByDefault = $false }
-        @{ Scope = 'Device'; Path = 'SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableImageCreator'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
-        @{ Scope = 'Device'; Path = 'SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableGenerativeFill'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
-        @{ Scope = 'Device'; Path = 'SOFTWARE\Policies\Microsoft\Paint'; Name = 'DisableCocreator'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
+        @{ Scope = 'Device'; Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint'; Name = 'DisableImageCreator'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
+        @{ Scope = 'Device'; Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint'; Name = 'DisableGenerativeFill'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
+        @{ Scope = 'Device'; Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Paint'; Name = 'DisableCocreator'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
         @{ Scope = 'Device'; Path = 'SOFTWARE\Policies\WindowsNotepad'; Name = 'DisableAIFeatures'; Value = 1; Type = 'DWord'; ApplyByDefault = $true }
     )
 

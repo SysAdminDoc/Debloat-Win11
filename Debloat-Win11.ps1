@@ -2718,6 +2718,9 @@ if ($script:exitCode -ne 0) {
 
 if ($OutputFormat -eq 'Text') { Write-Host "`nRestart recommended to apply all changes." -ForegroundColor Yellow }
 
+# Enforce the retention bound after this run's artifacts have been created.
+Invoke-DebloatLogRetention -Directory $LogDir -KeepPerType ([int]$script:manifest.observability.log_retention_per_type)
+
 # Clean up lockfile
 Remove-Item $script:lockFile -Force -EA 0
 
