@@ -9,8 +9,9 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - Registry, service, task, AppX, firewall, and selected orchestrator operations record planned/succeeded/failed/skipped results; incomplete runs are not detected as compliant.
 - Module cleanup paths now use the same tracked-operation contract, verify service/feature/firewall/time changes, and include operation status/error rows in console, JSON, and HTML output.
 - Destructive package, OEM, Office, OneDrive, firewall, file, startup, feature, and bookmark cleanup requires explicit `-AllowIrreversibleChanges` approval.
-- Test mocks use Pester's `Should -Invoke` syntax; the 129-test suite passes under Pester 5.9 and 6.0 on PowerShell 7 and under Windows PowerShell 5.1 with Pester 5.9.
+- Test mocks use Pester's `Should -Invoke` syntax; the 131-test suite passes under Pester 5.9 and 6.0.1 on PowerShell 7 and under Windows PowerShell 5.1 with Pester 5.9.
 - Added `tools/Invoke-TestSuite.ps1` to validate an installed Pester version before running the suite; the declared matrix is Pester 5.9.0 on Windows PowerShell 5.1/PowerShell 7 and Pester 6.0.1 on PowerShell 7.
+- Added versioned, data-only `Modules/PolicyCatalog.psd1` for Windows AI policies, shared HKCU tweaks, and typed config-schema validation; removed executable policy-data loading.
 - Network defaults preserve connection profiles, restrict sharing rules to Domain/Private, and exclude LLMNR; OEM cleanup no longer targets Intel drivers, language packs, or Windows Security startup.
 
 ## [v2.3.10] - 2026-08-11
@@ -36,7 +37,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
 - Maintenance script counter tracks individual settings re-applied, not profiles visited.
 
 ### Added
-- Paint AI policies (Cocreator, ImageCreator, GenerativeFill) and Notepad DisableAIFeatures unified into `WindowsAiPolicies.psd1` shared map.
+- Paint AI policies (Cocreator, ImageCreator, GenerativeFill), Notepad DisableAIFeatures, and shared HKCU tweaks unified into the versioned `Modules/PolicyCatalog.psd1` data-only map.
 - Drift detection summary reports total checks performed.
 - Pester tests for lockfile stale PID, revert script quoting, service dedup, temp cleanup gating, shared AI map coverage, OneDrive safety, and firewall Program parameter.
 
@@ -170,7 +171,7 @@ All notable changes to Debloat-Win11 will be documented in this file.
   Why: `reg load` fails for profiles of currently logged-in users; their HKCU tweaks are not re-applied by the scheduled task running as SYSTEM
   Where: Debloat-Win11-Maintain.ps1, Remediate-Drift.ps1
 - [ ] P3 — AllUsers HKCU propagation hardcodes REG_DWORD for all values
-  Why: If a String-type tweak is added to HkcuTweaks.psd1, the AllUsers/maintenance/remediation paths will write it as REG_DWORD
+  Why: If a String-type tweak is added to the shared policy catalog, the AllUsers/maintenance/remediation paths will write it as REG_DWORD
   Where: Modules/SystemTweaks_System.ps1:213, Debloat-Win11-Maintain.ps1:113, Remediate-Drift.ps1:83
 - [ ] P3 — AppxRemoved counter undercounts provisioned-only packages
   Why: Remove-AppxDryRun only increments the counter for user-installed packages, not provisioned-only ones

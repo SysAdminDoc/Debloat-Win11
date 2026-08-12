@@ -41,11 +41,40 @@ if ($UndoFile -and $DryRun) {
 # Explain mode: forces DryRun + prints rationale for each planned change
 if ($Explain) { $DryRun = [switch]::new($true) }
 
-$script:windowsAiPolicyFile = Join-Path $PSScriptRoot 'Modules\WindowsAiPolicies.psd1'
-$script:windowsAiPolicies = if (Test-Path $script:windowsAiPolicyFile) {
-    & ([scriptblock]::Create((Get-Content $script:windowsAiPolicyFile -Raw)))
-} else {
-    @()
+$script:policyCatalogFile = Join-Path $PSScriptRoot 'Modules\PolicyCatalog.psd1'
+try {
+    $script:policyCatalog = Import-PowerShellDataFile -Path $script:policyCatalogFile
+} catch {
+    Write-Host "ERROR: Policy catalog failed to load: $($_.Exception.Message)" -ForegroundColor Red
+    exit 2
+}
+if ($script:policyCatalog.SchemaVersion -ne 1 -or [string]::IsNullOrWhiteSpace([string]$script:policyCatalog.CatalogVersion)) {
+    Write-Host "ERROR: Policy catalog schema/version is unsupported: $($script:policyCatalog.SchemaVersion)/$($script:policyCatalog.CatalogVersion)" -ForegroundColor Red
+    exit 2
+}
+$script:windowsAiPolicies = @($script:policyCatalog.Policies)
+$script:hkcuTweaks = @($script:policyCatalog.HkcuTweaks)
+$catalogErrors = [System.Collections.ArrayList]@()
+$validRegistryTypes = @('DWord','QWord','String','ExpandString','MultiString','Binary')
+foreach ($policy in $script:windowsAiPolicies) {
+    if ($policy.Scope -notin @('Device','User') -or [string]::IsNullOrWhiteSpace([string]$policy.Path) -or [string]::IsNullOrWhiteSpace([string]$policy.Name)) {
+        $catalogErrors.Add("Invalid policy scope/path/name: $($policy | Out-String)") | Out-Null
+    }
+    if ($policy.Type -notin $validRegistryTypes) { $catalogErrors.Add("Invalid policy type '$($policy.Type)' for $($policy.Name)") | Out-Null }
+    if ($policy.ApplyByDefault -isnot [bool]) { $catalogErrors.Add("Policy $($policy.Name) must declare boolean ApplyByDefault") | Out-Null }
+}
+foreach ($tweak in $script:hkcuTweaks) {
+    if ($tweak.Scope -ne 'User' -or [string]::IsNullOrWhiteSpace([string]$tweak.Path) -or [string]::IsNullOrWhiteSpace([string]$tweak.Name)) {
+        $catalogErrors.Add("Invalid HKCU tweak scope/path/name: $($tweak | Out-String)") | Out-Null
+    }
+    if ($tweak.Type -notin $validRegistryTypes) { $catalogErrors.Add("Invalid HKCU tweak type '$($tweak.Type)' for $($tweak.Name)") | Out-Null }
+}
+$duplicatePolicies = $script:windowsAiPolicies | ForEach-Object { "$($_.Scope)|$($_.Path)|$($_.Name)" } | Group-Object | Where-Object Count -gt 1
+foreach ($duplicate in $duplicatePolicies) { $catalogErrors.Add("Duplicate policy catalog key '$($duplicate.Name)'") | Out-Null }
+if ($catalogErrors.Count -gt 0) {
+    Write-Host "ERROR: Policy catalog validation failed:" -ForegroundColor Red
+    $catalogErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    exit 2
 }
 
 # ============================================================================
@@ -457,10 +486,8 @@ $script:defaultRemovePatterns = @(
 # ============================================================================
 # Merge external .psd1 config into the session, overriding built-in arrays
 $script:configOverrides = @{}
-$script:validConfigKeys = @('RemovePatterns','ServicesToDisable','DefenderExclusions','EdgeBookmarks',
-                            'StartupBloat','TasksToDisable','FeaturesToDisable','FirewallRules',
-                            'DarkMode','OemExclude','ClearEventLogs','NetworkProfile',
-                            'DisableNagle','EnableNetworkDiscovery','EnableFilePrinterSharing')
+$script:configSchema = $script:policyCatalog.ConfigSchema
+$script:validConfigKeys = @($script:configSchema.Keys)
 if ($ConfigPath) {
     if (!(Test-Path $ConfigPath)) {
         Write-Host "ERROR: Config file not found: $ConfigPath" -ForegroundColor Red
@@ -472,10 +499,54 @@ if ($ConfigPath) {
         Write-Host "ERROR: Failed to parse config file: $_" -ForegroundColor Red
         exit 2
     }
+    $configErrors = [System.Collections.ArrayList]@()
     foreach ($key in $script:configOverrides.Keys) {
         if ($script:validConfigKeys -notcontains $key) {
-            Write-Host "WARNING: Unknown config key '$key' in $ConfigPath. Valid keys: $($script:validConfigKeys -join ', ')" -ForegroundColor Yellow
+            $configErrors.Add("Unknown config key '$key'. Valid keys: $($script:validConfigKeys -join ', ')") | Out-Null
+            continue
         }
+        $schema = $script:configSchema[$key]
+        $value = $script:configOverrides[$key]
+        switch ($schema.Type) {
+            'Boolean' {
+                if ($value -isnot [bool]) { $configErrors.Add("$key must be a Boolean") | Out-Null }
+            }
+            'String' {
+                if ($value -isnot [string]) { $configErrors.Add("$key must be a String") | Out-Null }
+            }
+            'Enum' {
+                if ($value -isnot [string] -or $schema.Values -notcontains $value) { $configErrors.Add("$key must be one of: $($schema.Values -join ', ')") | Out-Null }
+            }
+            'StringArray' {
+                if ($value -is [string] -or $value -isnot [System.Collections.IEnumerable]) {
+                    $configErrors.Add("$key must be an array of strings") | Out-Null
+                } else {
+                    foreach ($element in @($value)) {
+                        if ($element -isnot [string] -or ($schema.ElementPattern -and [string]$element -notmatch $schema.ElementPattern)) {
+                            $configErrors.Add("$key contains an invalid string value '$element'") | Out-Null
+                        }
+                    }
+                }
+            }
+            'BookmarkArray' {
+                if ($value -is [string] -or $value -isnot [System.Collections.IEnumerable]) {
+                    $configErrors.Add("$key must be an array of bookmark objects") | Out-Null
+                } else {
+                    foreach ($bookmark in @($value)) {
+                        $uri = $null
+                        $validUri = [Uri]::TryCreate([string]$bookmark.url, [UriKind]::Absolute, [ref]$uri)
+                        if ($bookmark -isnot [hashtable] -or [string]::IsNullOrWhiteSpace([string]$bookmark.name) -or -not $validUri -or $uri.Scheme -notin @('http','https')) {
+                            $configErrors.Add("$key contains a bookmark with a missing name or HTTP(S) URL") | Out-Null
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if ($configErrors.Count -gt 0) {
+        Write-Host "ERROR: Config validation failed:" -ForegroundColor Red
+        $configErrors | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+        exit 2
     }
 }
 

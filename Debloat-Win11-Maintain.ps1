@@ -37,12 +37,9 @@ function Set-RegMaintain {
     }
 }
 
-$windowsAiPolicyFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Modules\WindowsAiPolicies.psd1'
-$windowsAiPolicies = if (Test-Path $windowsAiPolicyFile) {
-    & ([scriptblock]::Create((Get-Content $windowsAiPolicyFile -Raw)))
-} else {
-    @()
-}
+$policyCatalogFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Modules\PolicyCatalog.psd1'
+$policyCatalog = if (Test-Path $policyCatalogFile) { Import-PowerShellDataFile -Path $policyCatalogFile } else { @{} }
+$windowsAiPolicies = @($policyCatalog.Policies)
 
 # ============================================================================
 # HKLM POLICIES (machine-wide, work regardless of which user is logged in)
@@ -74,24 +71,8 @@ Set-RegMaintain -Path "HKLM:\SOFTWARE\Policies\Microsoft\Dsh" -Name "AllowNewsAn
 # ============================================================================
 Write-MaintainLog "  Applying per-user HKCU tweaks..."
 
-# Load shared definitions so both scripts stay in sync
-$hkcuDataFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Modules\HkcuTweaks.psd1'
-if (Test-Path $hkcuDataFile) {
-    $hkcuTweaks = & ([scriptblock]::Create((Get-Content $hkcuDataFile -Raw)))
-} else {
-    Write-MaintainLog "  WARNING: HkcuTweaks.psd1 not found, using inline fallback"
-    $hkcuTweaks = @(
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; Name = 'Enabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Search'; Name = 'BingSearchEnabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'ShowCopilotButton'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'TaskbarDa'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Start_IrisRecommendations'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\UserProfileEngagement'; Name = 'ScoobeSystemSettingEnabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot'; Name = 'TurnOffWindowsCopilot'; Value = 1 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'SilentInstalledAppsEnabled'; Value = 0 }
-        @{ Path = 'SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'; Name = 'ContentDeliveryAllowed'; Value = 0 }
-    )
-}
+$hkcuTweaks = @($policyCatalog.HkcuTweaks)
+if ($hkcuTweaks.Count -eq 0) { Write-MaintainLog "  WARNING: Policy catalog has no HKCU tweaks" }
 
 function Get-HkcuTweakType {
     param([hashtable]$Tweak)

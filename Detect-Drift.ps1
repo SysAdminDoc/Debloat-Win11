@@ -10,12 +10,9 @@
 
 $ErrorActionPreference = "SilentlyContinue"
 
-$windowsAiPolicyFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Modules\WindowsAiPolicies.psd1'
-$windowsAiPolicies = if (Test-Path $windowsAiPolicyFile) {
-    & ([scriptblock]::Create((Get-Content $windowsAiPolicyFile -Raw)))
-} else {
-    @()
-}
+$policyCatalogFile = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Modules\PolicyCatalog.psd1'
+$policyCatalog = if (Test-Path $policyCatalogFile) { Import-PowerShellDataFile -Path $policyCatalogFile } else { @{} }
+$windowsAiPolicies = @($policyCatalog.Policies)
 
 $driftChecks = @(
     @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection'; Name = 'AllowTelemetry'; Expected = 0 }

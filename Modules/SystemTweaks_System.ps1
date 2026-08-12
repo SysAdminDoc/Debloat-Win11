@@ -228,13 +228,8 @@ if ($AllUsers -and -not $DryRun) {
     $allUsersResult = Invoke-TrackedOperation -Name 'AllUsers HKCU propagation' -Action 'Apply HKCU tweak catalog to loaded user profiles' -Scope 'AllUsers' -Operation {
     Write-Log "[AllUsers] Applying HKCU tweaks to all user profiles..." "SECTION"
 
-    $hkcuDataFile = Join-Path $PSScriptRoot 'HkcuTweaks.psd1'
-    if (Test-Path $hkcuDataFile) {
-        $hkcuTweaks = & ([scriptblock]::Create((Get-Content $hkcuDataFile -Raw)))
-    } else {
-        Write-Log "  WARNING: HkcuTweaks.psd1 not found, skipping AllUsers propagation" "WARNING"
-        $hkcuTweaks = @()
-    }
+    $hkcuTweaks = @($script:hkcuTweaks)
+    if ($hkcuTweaks.Count -eq 0) { Write-Log "  WARNING: Policy catalog has no HKCU tweaks, skipping AllUsers propagation" "WARNING" }
 
     $userProfiles = Get-ChildItem 'C:\Users' -Directory -EA 0 | Where-Object { $_.Name -notmatch '^(Public|Default User|All Users)$' }
     $appliedCount = 0

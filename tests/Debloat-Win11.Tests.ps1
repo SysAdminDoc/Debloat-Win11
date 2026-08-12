@@ -729,20 +729,21 @@ Describe 'Registry Version Stamp' {
 }
 
 Describe 'Shared HKCU Tweaks' {
-    It 'HkcuTweaks.psd1 exists and is valid' {
-        $tweakFile = Join-Path $repoRoot 'Modules\HkcuTweaks.psd1'
+    It 'PolicyCatalog.psd1 contains valid shared HKCU tweaks' {
+        $tweakFile = Join-Path $repoRoot 'Modules\PolicyCatalog.psd1'
         Test-Path $tweakFile | Should -Be $true
-        $tweaks = & ([scriptblock]::Create((Get-Content $tweakFile -Raw)))
+        $catalog = Import-PowerShellDataFile -Path $tweakFile
+        $tweaks = @($catalog.HkcuTweaks)
         $tweaks.Count | Should -BeGreaterThan 20
     }
 
     It 'maintenance script loads shared tweaks' {
         $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
-        $maintainContent | Should -Match 'HkcuTweaks\.psd1'
+        $maintainContent | Should -Match 'PolicyCatalog\.psd1'
     }
 
     It 'AllUsers block loads shared tweaks' {
-        $allContent | Should -Match 'HkcuTweaks\.psd1'
+        $allContent | Should -Match 'PolicyCatalog'
     }
 }
 
@@ -773,7 +774,7 @@ Describe 'Logged-in HKCU Propagation' {
 
 Describe 'Typed HKCU Propagation' {
     BeforeAll {
-        $hkcuContent = Get-Content (Join-Path $repoRoot 'Modules\HkcuTweaks.psd1') -Raw
+        $hkcuContent = Get-Content (Join-Path $repoRoot 'Modules\PolicyCatalog.psd1') -Raw
         $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
         $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
         $systemTweaksContent = Get-Content (Join-Path $repoRoot 'Modules\SystemTweaks_System.ps1') -Raw
@@ -835,8 +836,9 @@ Describe 'RemoveDefaultMicrosoftStorePackages Policy' {
 Describe 'Expanded Drift Detection' {
     It 'checks at least 30 registry values' {
         $driftBlock = [regex]::Match($scriptContent, '\$driftChecks\s*=\s*@\(([\s\S]*?)\)').Groups[1].Value
-        $policyFile = Join-Path $repoRoot 'Modules\WindowsAiPolicies.psd1'
-        $policyChecks = & ([scriptblock]::Create((Get-Content $policyFile -Raw))) | Where-Object { $_.ApplyByDefault -ne $false }
+        $policyFile = Join-Path $repoRoot 'Modules\PolicyCatalog.psd1'
+        $catalog = Import-PowerShellDataFile -Path $policyFile
+        $policyChecks = @($catalog.Policies) | Where-Object { $_.ApplyByDefault -ne $false }
         $checkCount = ([regex]::Matches($driftBlock, '@\{')).Count + @($policyChecks).Count
         $checkCount | Should -BeGreaterOrEqual 30
     }
@@ -860,9 +862,10 @@ Describe 'Expanded Drift Detection' {
 
 Describe 'WindowsAI Policy Map' {
     BeforeAll {
-        $windowsAiPolicyFile = Join-Path $repoRoot 'Modules\WindowsAiPolicies.psd1'
-        $windowsAiPolicies = & ([scriptblock]::Create((Get-Content $windowsAiPolicyFile -Raw)))
-        $hkcuContent = Get-Content (Join-Path $repoRoot 'Modules\HkcuTweaks.psd1') -Raw
+        $windowsAiPolicyFile = Join-Path $repoRoot 'Modules\PolicyCatalog.psd1'
+        $catalog = Import-PowerShellDataFile -Path $windowsAiPolicyFile
+        $windowsAiPolicies = @($catalog.Policies)
+        $hkcuContent = Get-Content $windowsAiPolicyFile -Raw
         $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
         $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
     }
@@ -890,8 +893,31 @@ Describe 'WindowsAI Policy Map' {
     }
 
     It 'drives remediation and maintenance from the shared policy file' {
-        $remediateContent | Should -Match 'WindowsAiPolicies\.psd1'
-        $maintainContent | Should -Match 'WindowsAiPolicies\.psd1'
+        $remediateContent | Should -Match 'PolicyCatalog\.psd1'
+        $maintainContent | Should -Match 'PolicyCatalog\.psd1'
+    }
+}
+
+Describe 'Policy Catalog Contract' {
+    BeforeAll {
+        $catalogFile = Join-Path $repoRoot 'Modules\PolicyCatalog.psd1'
+        $catalog = Import-PowerShellDataFile -Path $catalogFile
+        $catalogContent = Get-Content $catalogFile -Raw
+    }
+
+    It 'is data-only and versioned' {
+        $catalog.SchemaVersion | Should -Be 1
+        [string]::IsNullOrWhiteSpace([string]$catalog.CatalogVersion) | Should -Be $false
+        $catalogContent | Should -Not -Match '(?m)^\s*(function|param)\s'
+        $catalogContent | Should -Not -Match 'scriptblock::Create|Invoke-Expression'
+    }
+
+    It 'keeps policy and configuration metadata typed' {
+        @($catalog.Policies).Count | Should -BeGreaterThan 10
+        @($catalog.HkcuTweaks).Count | Should -BeGreaterThan 20
+        @($catalog.ConfigSchema.Keys) | Should -Contain 'RemovePatterns'
+        $catalog.ConfigSchema.DarkMode.Type | Should -Be 'Boolean'
+        $catalog.ConfigSchema.NetworkProfile.Values | Should -Contain 'Preserve'
     }
 }
 
@@ -1143,8 +1169,9 @@ Describe 'Temp Cleanup Phase Gating' {
 
 Describe 'Shared AI Policy Map Coverage' {
     BeforeAll {
-        $policyFile = Join-Path $repoRoot 'Modules\WindowsAiPolicies.psd1'
-        $policies = & ([scriptblock]::Create((Get-Content $policyFile -Raw)))
+        $policyFile = Join-Path $repoRoot 'Modules\PolicyCatalog.psd1'
+        $catalog = Import-PowerShellDataFile -Path $policyFile
+        $policies = @($catalog.Policies)
     }
 
     It 'includes Paint AI policies in the shared map' {

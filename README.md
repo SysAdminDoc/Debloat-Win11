@@ -74,7 +74,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Temp file cleanup now respects `-Only`/`-Skip` phase selection (gated by Privacy phase)
 - Firewall rules correctly pass `Program=System` for kernel-level file/printer sharing rules
 - OneDrive removal checks per-profile file count before deleting multi-user folders
-- Paint and Notepad AI policies unified into `WindowsAiPolicies.psd1` shared map for drift/remediation parity
+- Windows AI policies and shared HKCU tweaks unified into the versioned, data-only `Modules/PolicyCatalog.psd1` for drift/remediation parity
 - Maintenance script counter now accurately reports individual settings re-applied
 - Drift detection reports total checks performed alongside OK/drifted/missing counts
 
@@ -97,7 +97,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - The script warns when mixing GPO registry and Intune OMA-URI policy delivery could create conflict risk
 
 ### New in v2.3.3
-- WindowsAI policy application, drift detection, and remediation now share `Modules/WindowsAiPolicies.psd1`
+- WindowsAI policy application, drift detection, and remediation now share `Modules/PolicyCatalog.psd1`
 - `DisableRecallDataProviders` is applied as a user-scope policy instead of an HKLM/device policy
 - Copilot hardware-key policy metadata is represented without applying a deployment-specific AUMID by default
 
@@ -1364,7 +1364,7 @@ A: Use System Restore to the "Pre-Debloat" restore point.
 - Maintenance script counter accurately reports individual settings re-applied.
 
 **New Features:**
-- Paint and Notepad AI policies unified into shared `WindowsAiPolicies.psd1` map for automatic drift/remediation coverage.
+- Paint and Notepad AI policies unified into the shared `Modules/PolicyCatalog.psd1` map for automatic drift/remediation coverage.
 - Drift detection reports total checks performed alongside status counts.
 
 **Tests:**
