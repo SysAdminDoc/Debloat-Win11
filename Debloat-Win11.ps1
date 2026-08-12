@@ -62,6 +62,7 @@ try {
 }
 $script:windowsAiPolicies = @($script:policyCatalog.Policies)
 $script:hkcuTweaks = @($script:policyCatalog.HkcuTweaks)
+$script:actionCatalog = @($script:policyCatalog.Actions)
 $catalogErrors = [System.Collections.ArrayList]@()
 $validRegistryTypes = @('DWord','QWord','String','ExpandString','MultiString','Binary')
 foreach ($policy in $script:windowsAiPolicies) {
@@ -76,6 +77,24 @@ foreach ($tweak in $script:hkcuTweaks) {
         $catalogErrors.Add("Invalid HKCU tweak scope/path/name: $($tweak | Out-String)") | Out-Null
     }
     if ($tweak.Type -notin $validRegistryTypes) { $catalogErrors.Add("Invalid HKCU tweak type '$($tweak.Type)' for $($tweak.Name)") | Out-Null }
+}
+foreach ($action in $script:actionCatalog) {
+    if ([string]::IsNullOrWhiteSpace([string]$action.Name) -or [string]::IsNullOrWhiteSpace([string]$action.Phase)) {
+        $catalogErrors.Add('Action metadata requires Name and Phase') | Out-Null
+    }
+    if ($action.Risk -notin @('Low','Medium','High','Critical')) { $catalogErrors.Add("Invalid action risk '$($action.Risk)' for $($action.Name)") | Out-Null }
+    if ([string]::IsNullOrWhiteSpace([string]$action.Scope)) { $catalogErrors.Add("Action $($action.Name) requires Scope metadata") | Out-Null }
+    if ($action.SupportedBuildMin -isnot [int] -or $action.SupportedBuildMin -lt 1) { $catalogErrors.Add("Action $($action.Name) requires a positive SupportedBuildMin") | Out-Null }
+    if (@($action.SupportedEditions).Count -eq 0) { $catalogErrors.Add("Action $($action.Name) requires SupportedEditions metadata") | Out-Null }
+    if (@($action.SupportedArchitectures).Count -eq 0) { $catalogErrors.Add("Action $($action.Name) requires SupportedArchitectures metadata") | Out-Null }
+    if ($action.DefaultEnabled -isnot [bool] -or $action.RequiresApproval -isnot [bool]) { $catalogErrors.Add("Action $($action.Name) requires boolean DefaultEnabled and RequiresApproval metadata") | Out-Null }
+    if ([string]::IsNullOrWhiteSpace([string]$action.Rollback)) { $catalogErrors.Add("Action $($action.Name) requires Rollback metadata") | Out-Null }
+}
+$actionPhaseDuplicates = $script:actionCatalog | ForEach-Object Phase | Group-Object | Where-Object Count -gt 1
+foreach ($duplicate in $actionPhaseDuplicates) { $catalogErrors.Add("Duplicate action metadata phase '$($duplicate.Name)'") | Out-Null }
+$expectedActionPhases = @('AppX','OEM','OneDrive','Office','Edge','Firewall','Privacy','Services','SystemTweaks','Power','Network','StartMenu','Updates')
+foreach ($expectedPhase in $expectedActionPhases) {
+    if (@($script:actionCatalog | Where-Object Phase -eq $expectedPhase).Count -ne 1) { $catalogErrors.Add("Action catalog must contain exactly one entry for phase '$expectedPhase'") | Out-Null }
 }
 $duplicatePolicies = $script:windowsAiPolicies | ForEach-Object { "$($_.Scope)|$($_.Path)|$($_.Name)" } | Group-Object | Where-Object Count -gt 1
 foreach ($duplicate in $duplicatePolicies) { $catalogErrors.Add("Duplicate policy catalog key '$($duplicate.Name)'") | Out-Null }
@@ -558,6 +577,24 @@ if ($ConfigPath) {
     }
 }
 
+function Get-ActionMetadata {
+    param([Parameter(Mandatory)][string]$Phase)
+    return $script:actionCatalog | Where-Object { $_.Phase -eq $Phase } | Select-Object -First 1
+}
+
+function Write-ActionPlan {
+    param([Parameter(Mandatory)][string]$Phase)
+    $action = Get-ActionMetadata -Phase $Phase
+    if (-not $action) { return }
+    $actionText = "  ACTION: $($action.Name) | Risk=$($action.Risk) | Scope=$($action.Scope) | MinBuild=$($action.SupportedBuildMin) | Rollback=$($action.Rollback) | Approval=$($action.RequiresApproval)"
+    Write-Log $actionText 'INFO'
+    if ($Explain) {
+        Write-Log "  PREREQUISITES: $($action.Prerequisites -join '; ')" 'INFO'
+        Write-Log "  DEPENDENCIES: $(if (@($action.Dependencies).Count) { $action.Dependencies -join '; ' } else { 'None' })" 'INFO'
+        Write-Log "  SUPPORTED EDITIONS: $($action.SupportedEditions -join ', ')" 'INFO'
+    }
+}
+
 # WIM helpers are defined before the WIM branch so every native DISM/registry
 # operation has checked status and the report can describe partial failures.
 function Add-WimReportOperation {
@@ -992,6 +1029,19 @@ $script:currentPhase = 0
 function Update-Phase {
     param([string]$PhaseName)
     $script:currentPhase++
+    $phaseMap = @{
+        'System Tweaks' = 'SystemTweaks'
+        'AppX Package Removal' = 'AppX'
+        'OEM Cleanup' = 'OEM'
+        'OneDrive Removal' = 'OneDrive'
+        'Office Removal' = 'Office'
+        'Service Cleanup' = 'Services'
+        'Edge Configuration' = 'Edge'
+        'Firewall Rules' = 'Firewall'
+        'Privacy Cleanup' = 'Privacy'
+        'App Updates' = 'Updates'
+    }
+    if ($phaseMap.ContainsKey($PhaseName)) { Write-ActionPlan -Phase $phaseMap[$PhaseName] }
     if (-not $Silent -and [Environment]::UserInteractive) {
         $pct = [int](($script:currentPhase / $script:totalPhases) * 100)
         Write-Progress -Activity "Debloat-Win11" -Status "$PhaseName" -PercentComplete $pct
@@ -1020,6 +1070,17 @@ $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
     version   = 'v2.3.10'
     dryrun    = $DryRun.IsPresent
+    catalog   = [ordered]@{
+        policy_catalog_version = [string]$script:policyCatalog.CatalogVersion
+        policy_catalog_schema = [int]$script:policyCatalog.SchemaVersion
+    }
+    action_plan = [System.Collections.ArrayList]@()
+    runtime   = [ordered]@{
+        os_build = $null
+        edition = $null
+        architecture = $null
+        supported = $null
+    }
     safety    = [ordered]@{
         irreversible_changes_allowed = $AllowIrreversibleChanges.IsPresent
         approval_switch = '-AllowIrreversibleChanges'
@@ -1394,6 +1455,54 @@ $editionId = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersi
 if ($editionId -match 'EnterpriseS|IoTEnterpriseS|ServerRdsh') {
     $script:isLTSC = $true
     Write-Log "[Pre-Check] Enterprise LTSC/IoT edition detected -- consumer-app phases will be skipped" "WARNING"
+}
+
+$osBuildNumber = 0
+if (-not [int]::TryParse([string]$osBuild, [ref]$osBuildNumber)) {
+    Write-Log "ERROR: Windows build number could not be determined" "ERROR"
+    exit 2
+}
+$architecture = if ($env:PROCESSOR_ARCHITEW6432) { [string]$env:PROCESSOR_ARCHITEW6432 } else { [string]$env:PROCESSOR_ARCHITECTURE }
+$architecture = switch -Regex ($architecture.ToLowerInvariant()) {
+    'amd64|x64' { 'x64'; break }
+    'arm64' { 'arm64'; break }
+    default { 'x86' }
+}
+$script:manifest.runtime.os_build = $osBuildNumber
+$script:manifest.runtime.edition = [string]$editionId
+$script:manifest.runtime.architecture = $architecture
+$script:manifest.runtime.supported = $true
+$supportErrors = [System.Collections.ArrayList]@()
+foreach ($action in $script:actionCatalog) {
+    $selected = Test-PhaseEnabled -Phase $action.Phase
+    $editionSupported = @($action.SupportedEditions) -contains 'AnyClient' -or @($action.SupportedEditions) -contains $editionId
+    $architectureSupported = @($action.SupportedArchitectures) -contains $architecture
+    $buildSupported = $osBuildNumber -ge [int]$action.SupportedBuildMin
+    $supported = $buildSupported -and $editionSupported -and $architectureSupported
+    $reason = if (-not $buildSupported) { "build $osBuildNumber is below $($action.SupportedBuildMin)" } elseif (-not $editionSupported) { "edition $editionId is not supported" } elseif (-not $architectureSupported) { "architecture $architecture is not supported" } else { $null }
+    $script:manifest.action_plan.Add([ordered]@{
+        name = $action.Name
+        phase = $action.Phase
+        selected = $selected
+        supported = $supported
+        risk = $action.Risk
+        scope = $action.Scope
+        prerequisites = @($action.Prerequisites)
+        dependencies = @($action.Dependencies)
+        rollback = $action.Rollback
+        requires_approval = [bool]$action.RequiresApproval
+        supported_build_min = [int]$action.SupportedBuildMin
+        supported_editions = @($action.SupportedEditions)
+        supported_architectures = @($action.SupportedArchitectures)
+        reason = $reason
+    }) | Out-Null
+    if ($selected -and -not $supported) { $supportErrors.Add("$($action.Name): $reason") | Out-Null }
+}
+if ($supportErrors.Count -gt 0) {
+    $script:manifest.runtime.supported = $false
+    Write-Log 'ERROR: Selected actions are outside the supported build/edition/architecture matrix:' 'ERROR'
+    $supportErrors | ForEach-Object { Write-Log "  $_" 'ERROR' }
+    exit 2
 }
 
 # ============================================================================

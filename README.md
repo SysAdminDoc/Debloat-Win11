@@ -67,6 +67,7 @@ This script is **hardware-aware** and defaults to a guarded, auditable run. It d
 - Network defaults preserve the current profile and do not enable discovery, file sharing, or LLMNR on Public networks.
 - Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
 - Intune drift detection and remediation enumerate all discovered user profiles, distinguish loaded/offline/skipped hives, and report per-setting counts.
+- The policy catalog also carries per-phase risk, scope, prerequisites, rollback, and supported build/edition/architecture metadata; selected unsupported actions fail before mutation.
 - WIM mode validates DISM/image/mount state, requires explicit `-AllowIrreversibleChanges` for saves, supports non-mutating `-DryRun`, and writes a transaction report with commit status.
 - The Windows integration harness is skipped unless `DEBLOAT_WIN11_INTEGRATION_VM=1` and `-AllowMutation` are supplied on a disposable elevated VM; failed runs preserve artifacts.
 

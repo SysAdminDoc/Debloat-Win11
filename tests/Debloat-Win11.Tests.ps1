@@ -1008,6 +1008,33 @@ Describe 'Policy Catalog Contract' {
         $catalog.ConfigSchema.DarkMode.Type | Should -Be 'Boolean'
         $catalog.ConfigSchema.NetworkProfile.Values | Should -Contain 'Preserve'
     }
+
+    It 'defines complete action risk and support metadata for every phase' {
+        $actions = @($catalog.Actions)
+        $actions.Count | Should -Be 13
+        foreach ($action in $actions) {
+            $action.Name | Should -Not -BeNullOrEmpty
+            $action.Phase | Should -Not -BeNullOrEmpty
+            $action.Risk | Should -BeIn @('Low','Medium','High','Critical')
+            @($action.Prerequisites).Count | Should -BeGreaterThan 0
+            @($action.SupportedEditions).Count | Should -BeGreaterThan 0
+            @($action.SupportedArchitectures).Count | Should -BeGreaterThan 0
+            $action.SupportedBuildMin | Should -BeGreaterThan 0
+            $action.Rollback | Should -Not -BeNullOrEmpty
+            $action.DefaultEnabled | Should -BeOfType [bool]
+            $action.RequiresApproval | Should -BeOfType [bool]
+        }
+    }
+}
+
+Describe 'Action Plan and Support Matrix' {
+    It 'records selected action metadata and rejects unsupported selections before mutation' {
+        $scriptContent | Should -Match 'manifest\.action_plan\.Add'
+        $scriptContent | Should -Match 'runtime\.supported'
+        $scriptContent | Should -Match 'supportErrors'
+        $scriptContent | Should -Match 'build.*edition.*architecture'
+        $scriptContent | Should -Match 'Write-ActionPlan'
+    }
 }
 
 Describe 'Destructive Operation Behavior Mocks' {
