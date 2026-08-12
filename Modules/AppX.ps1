@@ -3,6 +3,11 @@
 # Phase 1: Remove bloatware AppX packages (user + provisioned)
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
+if (-not (Test-IrreversibleOperationAllowed -Name 'AppX package removal')) {
+    Write-Log "[AppX] Package and shortcut removal SKIPPED (explicit approval required)" "WARNING"
+    return
+}
+
 Write-Log "[AppX] Removing bloatware packages..." "SECTION"
 Write-Rationale 'AppX'
 if ($script:isLTSC) {

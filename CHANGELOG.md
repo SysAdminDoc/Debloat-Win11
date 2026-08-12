@@ -2,6 +2,14 @@
 
 All notable changes to Debloat-Win11 will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- Phase selection now gates system-tweak subphases, pre/post service handling, maintenance registration, Explorer restart, and WinGet updates.
+- Registry, service, task, AppX, firewall, and selected orchestrator operations record planned/succeeded/failed/skipped results; incomplete runs are not detected as compliant.
+- Destructive package, OEM, Office, OneDrive, firewall, file, startup, feature, and bookmark cleanup requires explicit `-AllowIrreversibleChanges` approval.
+- Network defaults preserve connection profiles, restrict sharing rules to Domain/Private, and exclude LLMNR; OEM cleanup no longer targets Intel drivers, language packs, or Windows Security startup.
+
 ## [v2.3.10] - 2026-08-11
 
 ### Fixed

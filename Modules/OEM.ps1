@@ -4,12 +4,17 @@
 # Includes nuclear clean, bloat scheduled tasks, OEM registry
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
+if (-not (Test-IrreversibleOperationAllowed -Name 'OEM removal')) {
+    Write-Log "[OEM] OEM package, file, registry, and task removal SKIPPED (explicit approval required)" "WARNING"
+    return
+}
+
 Write-Log "[OEM] Removing OEM bloatware..." "SECTION"
 Write-Rationale 'OEM'
 
 # Intel chipset/driver services and processes that must NOT be killed
-$script:oemSafeIntelPattern = 'igfx|IntelAudio|Intel.*Driver|Intel.*Chipset|IntcDAud|IntcOED|IntelManagementEngine|imesrv|jhi_service|LMS'
-$script:oemMatchPattern = 'dell|intel|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer'
+$script:oemSafeIntelPattern = 'intel|igfx|IntcDAud|IntcOED|imesrv|jhi_service|LMS'
+$script:oemMatchPattern = 'dell|hp[^a-z]|lenovo|realtek|waves|asus|acer|msi[^a-z]|razer'
 
 # Config-driven OEM manufacturer exclusion
 $script:oemExclude = if ($script:configOverrides.ContainsKey('OemExclude')) { $script:configOverrides.OemExclude } else { @() }
@@ -42,13 +47,12 @@ if (-not $DryRun) {
 }
 
 # AppX removal (routed through Remove-AppxDryRun for DryRun + manifest tracking)
-$oemAppxPatterns = @('*Dell*','*DB6EA5DB*','*HONHAIPRECISION*','*Intel*','*AppUp*','*HPInc*','*Lenovo*','*Dolby*','*Realtek*','*Waves*')
+$oemAppxPatterns = @('*Dell*','*DB6EA5DB*','*HONHAIPRECISION*','*AppUp*','*HPInc*','*Lenovo*','*Dolby*','*Realtek*','*Waves*')
 foreach ($pattern in $oemAppxPatterns) {
-    Remove-AppxDryRun -Pattern $pattern
+    Remove-AppxDryRun -Pattern $pattern -AllowOutsideAppX
 }
 if (-not $DryRun) {
     Get-Package *Dell* 2>$null | Uninstall-Package -Force 2>$null
-    Get-Package *Intel* 2>$null | Uninstall-Package -Force 2>$null
 }
 
 Write-Log "  OEM AppX packages removed" "SUCCESS"
@@ -69,8 +73,7 @@ if (-not $DryRun) {
     @(
         "$env:ProgramData\Dell",
         "$env:ProgramData\Waves",
-        "C:\dell",
-        "C:\langpacks"
+        "C:\dell"
     ) | ForEach-Object {
         if (Test-Path $_) {
             $script:manifest.changes.folders_deleted.Add($_) | Out-Null
@@ -113,10 +116,6 @@ if (-not $DryRun) {
         "$env:ProgramData\DellTechHub",
         "$env:LOCALAPPDATA\Dell",
         "$env:APPDATA\Dell",
-        "$env:ProgramFiles\Intel",
-        "${env:ProgramFiles(x86)}\Intel",
-        "$env:ProgramData\Intel",
-        "$env:LOCALAPPDATA\Intel",
         "$env:ProgramFiles\HP",
         "${env:ProgramFiles(x86)}\HP",
         "${env:ProgramFiles(x86)}\Hewlett-Packard",
@@ -171,8 +170,6 @@ if (-not $DryRun) {
             "$($userProf.FullName)\AppData\Local\Dell",
             "$($userProf.FullName)\AppData\Roaming\Dell",
             "$($userProf.FullName)\AppData\Local\DellTechHub",
-            "$($userProf.FullName)\AppData\Local\Intel",
-            "$($userProf.FullName)\AppData\Roaming\Intel",
             "$($userProf.FullName)\AppData\Local\HP",
             "$($userProf.FullName)\AppData\Roaming\HP",
             "$($userProf.FullName)\AppData\Local\Lenovo",
@@ -303,8 +300,6 @@ if (-not $DryRun) {
         'HKLM:\SOFTWARE\DellInc',
         'HKLM:\SOFTWARE\WOW6432Node\Dell',
         'HKLM:\SOFTWARE\WOW6432Node\DellInc',
-        'HKLM:\SOFTWARE\Intel',
-        'HKLM:\SOFTWARE\WOW6432Node\Intel',
         'HKLM:\SOFTWARE\HP',
         'HKLM:\SOFTWARE\Hewlett-Packard',
         'HKLM:\SOFTWARE\WOW6432Node\HP',
@@ -343,7 +338,7 @@ if (-not $DryRun) {
     foreach ($path in $uninstallPaths) {
         Get-ChildItem $path -EA 0 | ForEach-Object {
             $props = Get-ItemProperty $_.PSPath -EA 0
-            if ($props.DisplayName -match 'Dell|MyDell|Intel|HP Support|HP System|HP Touchpoint|HP JumpStart|HP Customer|Lenovo|Realtek|Waves|ASUS|Armoury|MyASUS|ROG|Acer|AcerCare|MSI|Dragon Center|Mystic Light|Razer|Synapse|Cortex' -and $props.DisplayName -notmatch 'Dell ControlVault|Dell MD Storage|Dell OpenManage|Intel.*Driver|Realtek.*Driver') {
+            if ($props.DisplayName -match 'Dell|MyDell|HP Support|HP System|HP Touchpoint|HP JumpStart|HP Customer|Lenovo|Realtek|Waves|ASUS|Armoury|MyASUS|ROG|Acer|AcerCare|MSI|Dragon Center|Mystic Light|Razer|Synapse|Cortex' -and $props.DisplayName -notmatch 'Dell ControlVault|Dell MD Storage|Dell OpenManage|Intel|Realtek.*Driver') {
                     Remove-Item $_.PSPath -Recurse -Force -EA 0
             }
         }
@@ -359,7 +354,6 @@ if (-not $DryRun) {
             if ($LASTEXITCODE -eq 0) {
                 reg delete "$hiveName\SOFTWARE\Dell" /f 2>$null
                 reg delete "$hiveName\SOFTWARE\DellInc" /f 2>$null
-                reg delete "$hiveName\SOFTWARE\Intel" /f 2>$null
                 reg delete "$hiveName\SOFTWARE\HP" /f 2>$null
                 reg delete "$hiveName\SOFTWARE\Hewlett-Packard" /f 2>$null
                 reg delete "$hiveName\SOFTWARE\Lenovo" /f 2>$null
@@ -380,7 +374,7 @@ if (-not $DryRun) {
     )
     foreach ($path in $startupPaths) {
         $props = Get-ItemProperty $path -EA 0
-        $props.PSObject.Properties | Where-Object { $_.Value -match 'dell|intel|hp|lenovo|realtek|waves|asus|acer|msi|razer' } | ForEach-Object {
+        $props.PSObject.Properties | Where-Object { $_.Value -match 'dell|hp|lenovo|realtek|waves|asus|acer|msi|razer' -and $_.Value -notmatch 'intel' } | ForEach-Object {
             Remove-ItemProperty -Path $path -Name $_.Name -Force -EA 0
         }
     }
@@ -395,23 +389,17 @@ if (-not $DryRun) {
         Remove-ItemProperty -Path $path -Name 'Waves MaxxAudio' -Force -EA 0
     }
 
-    # Remove SecurityHealthSystray from startup
-    Remove-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'SecurityHealth' -Force -EA 0
-
     # Disable via registry (Task Manager startup apps use this)
     $startupApprovedPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
     if (Test-Path $startupApprovedPath) {
-        Remove-ItemProperty -Path $startupApprovedPath -Name 'SecurityHealth' -Force -EA 0
         Remove-ItemProperty -Path $startupApprovedPath -Name 'WavesSvc64' -Force -EA 0
     }
     $startupApprovedPath32 = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
     if (Test-Path $startupApprovedPath32) {
-        Remove-ItemProperty -Path $startupApprovedPath32 -Name 'SecurityHealth' -Force -EA 0
         Remove-ItemProperty -Path $startupApprovedPath32 -Name 'WavesSvc64' -Force -EA 0
     }
     $startupApprovedPath32_2 = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'
     if (Test-Path $startupApprovedPath32_2) {
-        Remove-ItemProperty -Path $startupApprovedPath32_2 -Name 'SecurityHealth' -Force -EA 0
         Remove-ItemProperty -Path $startupApprovedPath32_2 -Name 'WavesSvc64' -Force -EA 0
     }
 

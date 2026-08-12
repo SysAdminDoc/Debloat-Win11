@@ -25,7 +25,9 @@ param(
     [int]$WimIndex = 1,
     [string]$MountDir = "C:\Debloat-WIM-Mount",
     [switch]$CheckDrift,
-    [switch]$AllUsers
+    [switch]$AllUsers,
+    [switch]$UpdateApps,
+    [switch]$AllowIrreversibleChanges
 )
 
 # ============================================================================
@@ -121,7 +123,7 @@ $script:phaseRationale = @{
     Privacy      = "Clears browser caches, diagnostic logs, thumbnail cache, and recent files. Event-log clearing is opt-in via -ConfigPath."
     Services     = "Disables 30+ telemetry, gaming, and unused services. Preserves critical services (IPv6, USB detection, biometrics, proxy)."
     Power        = "Sets hardware-aware power plan: High Performance for desktops, Balanced with smart battery for laptops."
-    Network      = "Sets Private network profile, disables Nagle's algorithm for lower latency, enables network discovery."
+    Network      = "Preserves network profiles by default; optional Nagle/discovery/file-sharing changes are explicit and limited to Domain/Private."
     StartMenu    = "Clears Start Menu suggestions and pinned bloatware tiles."
 }
 
@@ -457,7 +459,8 @@ $script:defaultRemovePatterns = @(
 $script:configOverrides = @{}
 $script:validConfigKeys = @('RemovePatterns','ServicesToDisable','DefenderExclusions','EdgeBookmarks',
                             'StartupBloat','TasksToDisable','FeaturesToDisable','FirewallRules',
-                            'DarkMode','OemExclude','ClearEventLogs')
+                            'DarkMode','OemExclude','ClearEventLogs','NetworkProfile',
+                            'DisableNagle','EnableNetworkDiscovery','EnableFilePrinterSharing')
 if ($ConfigPath) {
     if (!(Test-Path $ConfigPath)) {
         Write-Host "ERROR: Config file not found: $ConfigPath" -ForegroundColor Red
@@ -616,18 +619,56 @@ if ($WimPath) {
 # ============================================================================
 # Valid phases for -Only / -Skip
 $script:validPhases = @('AppX','OEM','OneDrive','Office','Edge','Firewall','Privacy',
-                        'Services','SystemTweaks','Power','Network','StartMenu')
+                        'Services','SystemTweaks','Power','Network','StartMenu','Updates')
 
 if ($Only -and $Skip) {
     Write-Host "ERROR: -Only and -Skip cannot be used together" -ForegroundColor Red
     exit 2
 }
 
+function Test-SystemTweaksSelected {
+    if ($Only) {
+        return ($Only -contains 'SystemTweaks' -or
+            @($Only | Where-Object { $_ -in @('Power','Network','StartMenu') }).Count -gt 0)
+    }
+    return (-not ($Skip -and $Skip -contains 'SystemTweaks'))
+}
+
+function Test-SystemTweaksCoreSelected {
+    if (-not (Test-SystemTweaksSelected)) { return $false }
+    if ($Only) { return ($Only -contains 'SystemTweaks') }
+    return $true
+}
+
+function Test-SystemTweakEnabled {
+    param([string]$SubPhase)
+    if (-not (Test-SystemTweaksSelected)) { return $false }
+    if ($Only) { return ($Only -contains 'SystemTweaks' -or $Only -contains $SubPhase) }
+    if ($Skip) { return ($Skip -notcontains 'SystemTweaks' -and $Skip -notcontains $SubPhase) }
+    return $true
+}
+
 function Test-PhaseEnabled {
     param([string]$Phase)
+    if ($Phase -eq 'SystemTweaks') { return (Test-SystemTweaksSelected) }
+    if ($Phase -eq 'Updates') {
+        return ($UpdateApps -or ($Only -and $Only -contains 'Updates')) -and (-not ($Skip -and $Skip -contains 'Updates'))
+    }
     if ($Only) { return ($Only -contains $Phase) }
     if ($Skip) { return ($Skip -notcontains $Phase) }
     return $true
+}
+
+function Test-AnyPhaseSelected {
+    if ($Only) { return @($Only | Where-Object { $_ -in $script:validPhases }).Count -gt 0 }
+    return $true
+}
+
+function Test-PreDebloatEnabled {
+    foreach ($phase in @('AppX','OEM','OneDrive','Office','Services','Privacy')) {
+        if (Test-PhaseEnabled $phase) { return $true }
+    }
+    return (Test-SystemTweaksCoreSelected)
 }
 
 # Validate phase names
@@ -666,6 +707,10 @@ $script:counters = @{
     ServicesDisabled   = 0
     TasksDisabled      = 0
     RegistryTweaks     = 0
+    OperationsAttempted = 0
+    OperationsSucceeded = 0
+    OperationsFailed    = 0
+    OperationsSkipped   = 0
     DiskBefore         = 0
     DiskAfter          = 0
 }
@@ -674,6 +719,10 @@ $script:manifest = @{
     timestamp = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
     version   = 'v2.3.10'
     dryrun    = $DryRun.IsPresent
+    safety    = [ordered]@{
+        irreversible_changes_allowed = $AllowIrreversibleChanges.IsPresent
+        approval_switch = '-AllowIrreversibleChanges'
+    }
     changes   = @{
         appx_removed       = [System.Collections.ArrayList]@()
         services_disabled  = [System.Collections.ArrayList]@()
@@ -682,6 +731,8 @@ $script:manifest = @{
         registry_set       = [System.Collections.ArrayList]@()
         registry_deleted   = [System.Collections.ArrayList]@()
         folders_deleted    = [System.Collections.ArrayList]@()
+        firewall_rules     = [System.Collections.ArrayList]@()
+        operations         = [System.Collections.ArrayList]@()
     }
 }
 
@@ -727,6 +778,79 @@ function Write-Log {
 # ============================================================================
 # DRY RUN AWARE HELPERS
 # ============================================================================
+function Register-OperationResult {
+    param(
+        [string]$Name,
+        [string]$Action,
+        [string]$Scope = 'Machine',
+        [ValidateSet('Planned','Succeeded','Failed','Skipped')]
+        [string]$Status,
+        [string]$ErrorMessage
+    )
+
+    $entry = [ordered]@{
+        name       = $Name
+        action     = $Action
+        scope      = $Scope
+        status     = $Status
+        timestamp  = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
+    }
+    if ($ErrorMessage) { $entry.error = $ErrorMessage }
+    $script:manifest.changes.operations.Add($entry) | Out-Null
+    if ($Status -ne 'Planned') { $script:counters.OperationsAttempted++ }
+    switch ($Status) {
+        'Succeeded' { $script:counters.OperationsSucceeded++ }
+        'Failed'    { $script:counters.OperationsFailed++; $script:exitCode = 1 }
+        'Skipped'   { $script:counters.OperationsSkipped++ }
+    }
+}
+
+function Register-OperationFailure {
+    param([string]$Name, [string]$Action, [string]$Scope = 'Machine', [object]$ErrorRecord)
+    $message = if ($ErrorRecord) { [string]$ErrorRecord.Exception.Message } else { 'Operation failed' }
+    Register-OperationResult -Name $Name -Action $Action -Scope $Scope -Status 'Failed' -ErrorMessage $message
+    Write-Log "  Operation failed [$Name]: $message" "ERROR"
+}
+
+function Invoke-TrackedOperation {
+    param(
+        [string]$Name,
+        [string]$Action,
+        [string]$Scope = 'Machine',
+        [scriptblock]$Operation,
+        [scriptblock]$Verification
+    )
+
+    if ($DryRun) {
+        Register-OperationResult -Name $Name -Action $Action -Scope $Scope -Status 'Planned'
+        return $true
+    }
+
+    try {
+        $ErrorActionPreference = 'Stop'
+        & $Operation
+        if ($Verification) {
+            $verified = & $Verification
+            if ($verified -is [bool] -and -not $verified) { throw 'Post-operation verification failed' }
+        }
+        Register-OperationResult -Name $Name -Action $Action -Scope $Scope -Status 'Succeeded'
+        return $true
+    } catch {
+        Register-OperationFailure -Name $Name -Action $Action -Scope $Scope -ErrorRecord $_
+        return $false
+    }
+}
+
+function Test-IrreversibleOperationAllowed {
+    param([string]$Name)
+
+    if ($DryRun -or $AllowIrreversibleChanges) { return $true }
+
+    Register-OperationResult -Name $Name -Action 'Blocked irreversible operation' -Scope 'Mixed' -Status 'Skipped'
+    Write-Log "[$Name] SKIPPED: irreversible changes require -AllowIrreversibleChanges (use -DryRun to preview)" "WARNING"
+    return $false
+}
+
 # Wraps Set-Reg to track registry changes and support DryRun
 function Set-Reg {
     param([string]$Path, [string]$Name, $Value, [string]$Type = "DWord")
@@ -747,10 +871,20 @@ function Set-Reg {
     }) | Out-Null
     $script:counters.RegistryTweaks++
 
-    if ($DryRun) { return }
+    if ($DryRun) {
+        Register-OperationResult -Name "$Path\$Name" -Action 'Set registry value' -Scope $(if ([string]$Path -like 'HKCU:*') { 'CurrentUser' } else { 'Machine' }) -Status 'Planned'
+        return
+    }
 
-    if (!(Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
-    Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force -EA 0
+    try {
+        if (!(Test-Path $Path)) { New-Item -Path $Path -Force -EA Stop | Out-Null }
+        Set-ItemProperty -Path $Path -Name $Name -Value $Value -Type $Type -Force -EA Stop
+        $current = Get-ItemProperty -Path $Path -Name $Name -EA Stop
+        if ($current.$Name -ne $Value) { throw "Registry verification returned '$($current.$Name)' instead of '$Value'" }
+        Register-OperationResult -Name "$Path\$Name" -Action 'Set registry value' -Scope $(if ([string]$Path -like 'HKCU:*') { 'CurrentUser' } else { 'Machine' }) -Status 'Succeeded'
+    } catch {
+        Register-OperationFailure -Name "$Path\$Name" -Action 'Set registry value' -Scope $(if ([string]$Path -like 'HKCU:*') { 'CurrentUser' } else { 'Machine' }) -ErrorRecord $_
+    }
 }
 
 # Cache all packages once at start of AppX phase for performance
@@ -769,7 +903,18 @@ function Add-AppxManifestEntry {
 }
 
 function Remove-AppxDryRun {
-    param([string]$Pattern)
+    param(
+        [string]$Pattern,
+        [switch]$AllowOutsideAppX
+    )
+
+    if (-not $AllowOutsideAppX -and -not (Test-PhaseEnabled 'AppX')) {
+        Register-OperationResult -Name "AppX removal: $Pattern" -Action 'Skipped because AppX phase is not selected' -Scope 'Mixed' -Status 'Skipped'
+        Write-Log "[AppX] '$Pattern' skipped because the AppX phase is not selected" "INFO"
+        return
+    }
+
+    if (-not (Test-IrreversibleOperationAllowed -Name "AppX removal: $Pattern")) { return }
 
     # Lazy-init: query once, filter many
     if ($null -eq $script:allAppxPackages) {
@@ -783,14 +928,28 @@ function Remove-AppxDryRun {
     foreach ($pkg in $pkgs) {
         Add-AppxManifestEntry -PackageName $pkg.Name | Out-Null
         if (-not $DryRun) {
-            $pkg | Remove-AppxPackage -AllUsers 2>$null
+            try {
+                $pkg | Remove-AppxPackage -AllUsers -ErrorAction Stop
+                Register-OperationResult -Name $pkg.Name -Action 'Remove AppX package' -Scope 'AllUsers' -Status 'Succeeded'
+            } catch {
+                Register-OperationFailure -Name $pkg.Name -Action 'Remove AppX package' -Scope 'AllUsers' -ErrorRecord $_
+            }
+        } else {
+            Register-OperationResult -Name $pkg.Name -Action 'Remove AppX package' -Scope 'AllUsers' -Status 'Planned'
         }
     }
     foreach ($pkg in $provPkgs) {
         $packageName = if (-not [string]::IsNullOrWhiteSpace([string]$pkg.DisplayName)) { [string]$pkg.DisplayName } else { [string]$pkg.PackageName }
         Add-AppxManifestEntry -PackageName $packageName | Out-Null
         if (-not $DryRun) {
-            $pkg | Remove-AppxProvisionedPackage -Online 2>$null
+            try {
+                $pkg | Remove-AppxProvisionedPackage -Online -ErrorAction Stop
+                Register-OperationResult -Name $packageName -Action 'Remove provisioned AppX package' -Scope 'Provisioned' -Status 'Succeeded'
+            } catch {
+                Register-OperationFailure -Name $packageName -Action 'Remove provisioned AppX package' -Scope 'Provisioned' -ErrorRecord $_
+            }
+        } else {
+            Register-OperationResult -Name $packageName -Action 'Remove provisioned AppX package' -Scope 'Provisioned' -Status 'Planned'
         }
     }
 }
@@ -805,8 +964,17 @@ function Disable-ServiceDryRun {
         }) | Out-Null
         $script:counters.ServicesDisabled++
         if (-not $DryRun) {
-            Stop-Service -Name $ServiceName -Force -EA 0
-            Set-Service -Name $ServiceName -StartupType Disabled -EA 0
+            try {
+                Stop-Service -Name $ServiceName -Force -EA Stop
+                Set-Service -Name $ServiceName -StartupType Disabled -EA Stop
+                $updated = Get-Service -Name $ServiceName -EA Stop
+                if ($updated.StartType.ToString() -ne 'Disabled') { throw "Service startup type remained '$($updated.StartType)'" }
+                Register-OperationResult -Name $ServiceName -Action 'Disable service' -Scope 'Machine' -Status 'Succeeded'
+            } catch {
+                Register-OperationFailure -Name $ServiceName -Action 'Disable service' -Scope 'Machine' -ErrorRecord $_
+            }
+        } else {
+            Register-OperationResult -Name $ServiceName -Action 'Disable service' -Scope 'Machine' -Status 'Planned'
         }
     }
 }
@@ -817,9 +985,18 @@ function Disable-TaskDryRun {
     foreach ($task in $tasks) {
         $script:manifest.changes.tasks_disabled.Add($task.TaskName) | Out-Null
         $script:counters.TasksDisabled++
-        if (-not $DryRun) {
-            $task | Stop-ScheduledTask -EA 0
-            $task | Disable-ScheduledTask -EA 0
+        if ($DryRun) {
+            Register-OperationResult -Name $task.TaskName -Action 'Disable scheduled task' -Scope 'Machine' -Status 'Planned'
+        } else {
+            try {
+                $task | Stop-ScheduledTask -EA Stop
+                $task | Disable-ScheduledTask -EA Stop
+                $updated = Get-ScheduledTask -TaskName $task.TaskName -EA Stop
+                if ($updated.State -eq 'Ready' -and $updated.Settings.Enabled) { throw 'Scheduled task remained enabled' }
+                Register-OperationResult -Name $task.TaskName -Action 'Disable scheduled task' -Scope 'Machine' -Status 'Succeeded'
+            } catch {
+                Register-OperationFailure -Name $task.TaskName -Action 'Disable scheduled task' -Scope 'Machine' -ErrorRecord $_
+            }
         }
     }
 }
@@ -1043,7 +1220,9 @@ if ($script:isSSD) {
 # CREATE SYSTEM RESTORE POINT
 # ============================================================================
 Write-Log "[Safety] Creating System Restore Point..." "SECTION"
-if ($DryRun) {
+if (-not (Test-AnyPhaseSelected)) {
+    Write-Log "  Restore point skipped because no execution phase is selected" "INFO"
+} elseif ($DryRun) {
     Write-Log "  [DRY RUN] Would create restore point" "INFO"
 } else {
     try {
@@ -1058,29 +1237,47 @@ if ($DryRun) {
 # ============================================================================
 # PRE-DEBLOAT: DISABLE INTERFERING SERVICES
 # ============================================================================
-Write-Log "[Pre-Debloat] Disabling interfering services..." "SECTION"
+if (Test-PreDebloatEnabled) {
+    $script:interferingServicesDisabled = $true
+    Write-Log "[Pre-Debloat] Disabling interfering services..." "SECTION"
 
-if ($DryRun) {
-    Write-Log "  [DRY RUN] Would stop Windows Update, Windows Search, SysMain" "INFO"
+    if ($DryRun) {
+        Write-Log "  [DRY RUN] Would stop Windows Update, Windows Search, SysMain" "INFO"
+    } else {
+        # Windows Update
+        Write-Log "  Stopping Windows Update..." "INFO"
+        Invoke-TrackedOperation -Name 'wuauserv' -Action 'Disable pre-debloat service' -Scope 'Machine' -Operation {
+            Stop-Service -Name 'wuauserv' -Force -EA Stop
+            Set-Service -Name 'wuauserv' -StartupType Disabled -EA Stop
+            Get-Process -Name 'WaaSMedicAgent', 'UsoClient', 'wuauclt', 'WUDFHost' -EA 0 | Stop-Process -Force -EA Stop
+        } -Verification {
+            (Get-Service -Name 'wuauserv' -EA Stop).StartType.ToString() -eq 'Disabled'
+        } | Out-Null
+
+        # Windows Search
+        Write-Log "  Stopping Windows Search..." "INFO"
+        Invoke-TrackedOperation -Name 'WSearch' -Action 'Disable pre-debloat service' -Scope 'Machine' -Operation {
+            Stop-Service -Name 'WSearch' -Force -EA Stop
+            Set-Service -Name 'WSearch' -StartupType Disabled -EA Stop
+            Get-Process -Name 'SearchIndexer', 'SearchHost', 'SearchApp' -EA 0 | Stop-Process -Force -EA Stop
+        } -Verification {
+            (Get-Service -Name 'WSearch' -EA Stop).StartType.ToString() -eq 'Disabled'
+        } | Out-Null
+
+        # SysMain (Superfetch)
+        Write-Log "  Stopping SysMain..." "INFO"
+        Invoke-TrackedOperation -Name 'SysMain' -Action 'Disable pre-debloat service' -Scope 'Machine' -Operation {
+            Stop-Service -Name 'SysMain' -Force -EA Stop
+            Set-Service -Name 'SysMain' -StartupType Disabled -EA Stop
+        } -Verification {
+            (Get-Service -Name 'SysMain' -EA Stop).StartType.ToString() -eq 'Disabled'
+        } | Out-Null
+
+        Write-Log "  Services disabled" "SUCCESS"
+    }
 } else {
-    # Windows Update
-    Write-Log "  Stopping Windows Update..." "INFO"
-    Stop-Service -Name 'wuauserv' -Force -EA 0
-    Set-Service -Name 'wuauserv' -StartupType Disabled -EA 0
-    Stop-Process -Name 'WaaSMedicAgent', 'UsoClient', 'wuauclt', 'WUDFHost' -Force -EA 0
-
-    # Windows Search
-    Write-Log "  Stopping Windows Search..." "INFO"
-    Stop-Service -Name 'WSearch' -Force -EA 0
-    Set-Service -Name 'WSearch' -StartupType Disabled -EA 0
-    Stop-Process -Name 'SearchIndexer', 'SearchHost', 'SearchApp' -Force -EA 0
-
-    # SysMain (Superfetch)
-    Write-Log "  Stopping SysMain..." "INFO"
-    Stop-Service -Name 'SysMain' -Force -EA 0
-    Set-Service -Name 'SysMain' -StartupType Disabled -EA 0
-
-    Write-Log "  Services disabled" "SUCCESS"
+    $script:interferingServicesDisabled = $false
+    Write-Log "[Pre-Debloat] Interfering services SKIPPED (not required by selected plan)" "INFO"
 }
 
 # ============================================================================
@@ -1353,7 +1550,7 @@ if (Test-PhaseEnabled 'Privacy') {
 # OPTIONAL: WINGET APP UPDATES (keeps surviving apps current)
 # ============================================================================
 $wingetPath = Get-Command 'winget' -EA 0
-if ($wingetPath) {
+if ($wingetPath -and (Test-PhaseEnabled 'Updates')) {
     Write-Log "[Updates] Updating surviving apps via winget..." "SECTION"
     if (-not $DryRun) {
         $wingetResult = & winget upgrade --all --silent --include-unknown --accept-source-agreements --accept-package-agreements 2>&1
@@ -1363,7 +1560,11 @@ if ($wingetPath) {
         Write-Log "  [DRY RUN] Would run: winget upgrade --all --silent --include-unknown" "INFO"
     }
 } else {
-    Write-Log "[Updates] winget not found -- skipping app updates" "INFO"
+    if (-not $wingetPath) {
+        Write-Log "[Updates] winget not found -- skipping app updates" "INFO"
+    } else {
+        Write-Log "[Updates] App updates skipped (use -UpdateApps or -Only Updates to opt in)" "INFO"
+    }
 }
 
 # Complete progress bar
@@ -1374,25 +1575,38 @@ if (-not $Silent -and [Environment]::UserInteractive) {
 # ============================================================================
 # POST-DEBLOAT: RE-ENABLE ESSENTIAL SERVICES
 # ============================================================================
-Write-Log "[Post-Debloat] Re-enabling essential services..." "SECTION"
+if ($script:interferingServicesDisabled) {
+    Write-Log "[Post-Debloat] Re-enabling essential services..." "SECTION"
 
-if (-not $DryRun) {
-    # Windows Update
-    Write-Log "  Re-enabling Windows Update..." "INFO"
-    Set-Service -Name 'wuauserv' -StartupType Manual -EA 0
-    Start-Service -Name 'wuauserv' -EA 0
+    if (-not $DryRun) {
+        # Windows Update
+        Write-Log "  Re-enabling Windows Update..." "INFO"
+        Invoke-TrackedOperation -Name 'wuauserv' -Action 'Re-enable post-debloat service' -Scope 'Machine' -Operation {
+            Set-Service -Name 'wuauserv' -StartupType Manual -EA Stop
+            Start-Service -Name 'wuauserv' -EA Stop
+        } -Verification {
+            (Get-Service -Name 'wuauserv' -EA Stop).StartType.ToString() -eq 'Manual'
+        } | Out-Null
 
-    # Windows Search
-    Write-Log "  Re-enabling Windows Search..." "INFO"
-    Set-Service -Name 'WSearch' -StartupType Automatic -EA 0
-    Start-Service -Name 'WSearch' -EA 0
+        # Windows Search
+        Write-Log "  Re-enabling Windows Search..." "INFO"
+        Invoke-TrackedOperation -Name 'WSearch' -Action 'Re-enable post-debloat service' -Scope 'Machine' -Operation {
+            Set-Service -Name 'WSearch' -StartupType Automatic -EA Stop
+            Start-Service -Name 'WSearch' -EA Stop
+        } -Verification {
+            (Get-Service -Name 'WSearch' -EA Stop).StartType.ToString() -eq 'Automatic'
+        } | Out-Null
+    }
+
+    Write-Log "  Services re-enabled" "SUCCESS"
+} else {
+    Write-Log "[Post-Debloat] Essential service restart SKIPPED (no pre-debloat service changes)" "INFO"
 }
-
-Write-Log "  Services re-enabled" "SUCCESS"
 
 # ============================================================================
 # REGISTER POST-UPDATE MAINTENANCE TASK
 # ============================================================================
+if (Test-SystemTweaksCoreSelected) {
 Write-Log "[Maintenance] Registering post-update scheduled task..." "SECTION"
 $maintainScript = Join-Path (Split-Path $MyInvocation.MyCommand.Path -Parent) 'Debloat-Win11-Maintain.ps1'
 if (Test-Path $maintainScript) {
@@ -1428,21 +1642,47 @@ if (Test-Path $maintainScript) {
 } else {
     Write-Log "  Debloat-Win11-Maintain.ps1 not found alongside script, skipping task registration" "WARNING"
 }
+} else {
+    Write-Log "[Maintenance] Scheduled task SKIPPED (SystemTweaks core not selected)" "INFO"
+}
 
 # ============================================================================
 # RESTART EXPLORER (Apply UI changes immediately)
 # ============================================================================
-Write-Log "[Finalizing] Restarting Explorer..." "SECTION"
-if (-not $DryRun) {
-    Stop-Process -Name explorer -Force -EA 0
-    Start-Sleep -Seconds 2
-    Start-Process explorer.exe
+if ($script:systemTweaksCoreSelected -or (Test-SystemTweakEnabled 'StartMenu')) {
+    Write-Log "[Finalizing] Restarting Explorer..." "SECTION"
+    if (-not $DryRun) {
+        Stop-Process -Name explorer -Force -EA 0
+        Start-Sleep -Seconds 2
+        Start-Process explorer.exe
+    }
+    Write-Log "  Explorer restart processed" "SUCCESS"
+} else {
+    Write-Log "[Finalizing] Explorer restart SKIPPED (UI phases not selected)" "INFO"
 }
-Write-Log "  Explorer restarted" "SUCCESS"
 
 # ============================================================================
 # WRITE UNDO MANIFEST
 # ============================================================================
+$unsupportedRollback = [System.Collections.ArrayList]@()
+if (@($script:manifest.changes.appx_removed).Count -gt 0) { $unsupportedRollback.Add('AppX packages require reinstall or Store recovery') | Out-Null }
+if (@($script:manifest.changes.folders_deleted).Count -gt 0) { $unsupportedRollback.Add('Deleted files and folders are not restorable from the manifest') | Out-Null }
+if (@($script:manifest.changes.registry_deleted).Count -gt 0) { $unsupportedRollback.Add('Deleted registry keys require a saved export or manual recovery') | Out-Null }
+if (@($script:manifest.changes.services_deleted).Count -gt 0) { $unsupportedRollback.Add('Deleted services require product-specific reinstallation') | Out-Null }
+if (@($script:manifest.changes.firewall_rules).Count -gt 0) { $unsupportedRollback.Add('Replaced firewall rules are snapshotted for audit but not yet auto-restored') | Out-Null }
+$script:manifest.rollback = [ordered]@{
+    schema_version = 1
+    generated_revert_script = $true
+    unsupported = @($unsupportedRollback)
+    status = if ($unsupportedRollback.Count -gt 0) { 'Partial' } else { 'Complete' }
+}
+$script:manifest.status = if ($DryRun) { 'Planned' } elseif ($script:exitCode -eq 0) { 'Complete' } else { 'Incomplete' }
+$script:manifest.operation_summary = [ordered]@{
+    attempted = $script:counters.OperationsAttempted
+    succeeded = $script:counters.OperationsSucceeded
+    failed    = $script:counters.OperationsFailed
+    skipped   = $script:counters.OperationsSkipped
+}
 try {
     $manifestJson = $script:manifest | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($manifestFile, $manifestJson, [System.Text.Encoding]::UTF8)
@@ -1452,12 +1692,19 @@ try {
 }
 
 # Write registry version stamp for Intune native detection
-if (-not $DryRun) {
+if (-not $DryRun -and $script:exitCode -eq 0) {
     $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
     if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
     Set-ItemProperty -Path $regStampPath -Name "Version" -Value "v2.3.10" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Complete" -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
     Set-ItemProperty -Path $regStampPath -Name "ManifestPath" -Value $manifestFile -Type String -Force -EA 0
+} elseif (-not $DryRun) {
+    $regStampPath = "HKLM:\SOFTWARE\Debloat-Win11"
+    if (!(Test-Path $regStampPath)) { New-Item -Path $regStampPath -Force | Out-Null }
+    Set-ItemProperty -Path $regStampPath -Name "Status" -Value "Incomplete" -Type String -Force -EA 0
+    Set-ItemProperty -Path $regStampPath -Name "LastRun" -Value (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') -Type String -Force -EA 0
+    Write-Log "Skipping completion stamp because the run is incomplete" "WARNING"
 }
 
 # ============================================================================
@@ -1470,6 +1717,14 @@ try {
     $revertLines.Add("# Auto-generated revert script from Debloat-Win11 v2.3.10") | Out-Null
     $revertLines.Add("# Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')") | Out-Null
     $revertLines.Add('$ErrorActionPreference = "SilentlyContinue"') | Out-Null
+    $revertLines.Add('$revertExitCode = 0') | Out-Null
+    if ($unsupportedRollback.Count -gt 0) {
+        $revertLines.Add('Write-Warning "This manifest contains changes that cannot be automatically restored:"') | Out-Null
+        foreach ($unsupportedReason in $unsupportedRollback) {
+            $revertLines.Add(('Write-Warning "' + $unsupportedReason + '"')) | Out-Null
+        }
+        $revertLines.Add('$revertExitCode = 2') | Out-Null
+    }
     $revertLines.Add('') | Out-Null
 
     $regEntries = @($script:manifest.changes.registry_set)
@@ -1502,7 +1757,7 @@ try {
         $revertLines.Add("Get-ScheduledTask -TaskName '$escapedTask' -EA 0 | Enable-ScheduledTask -EA 0") | Out-Null
     }
     $revertLines.Add('') | Out-Null
-    $revertLines.Add('Write-Host "Revert complete. Restart recommended." -ForegroundColor Green') | Out-Null
+    $revertLines.Add('if ($revertExitCode -eq 0) { Write-Host "Revert complete. Restart recommended." -ForegroundColor Green } else { Write-Warning "Revert completed with unsupported changes; manual recovery is required."; exit $revertExitCode }') | Out-Null
 
     $revertContent = $revertLines -join "`r`n"
     [System.IO.File]::WriteAllText($revertFile, $revertContent, [System.Text.Encoding]::UTF8)

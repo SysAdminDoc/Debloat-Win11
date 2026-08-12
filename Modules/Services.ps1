@@ -66,40 +66,9 @@ $servicesToDisable = if ($script:configOverrides.ContainsKey('ServicesToDisable'
     # REMOVED: TabletInputService (touch input)
 ) }
 
-# Parallel service disable on PS7+; sequential fallback on PS5
-if ($PSVersionTable.PSVersion.Major -ge 7 -and -not $DryRun) {
-    # Snapshot startup types before parallel mutation so undo restores the true original state.
-    $serviceStartupSnapshots = [System.Collections.ArrayList]@()
-    foreach ($svcName in $servicesToDisable) {
-        $svcObj = Get-Service -Name $svcName -EA 0
-        if ($svcObj) {
-            $serviceStartupSnapshots.Add([pscustomobject]@{
-                Name = $svcName
-                OriginalStartupType = $svcObj.StartType.ToString()
-            }) | Out-Null
-        }
-    }
-
-    # Parallel path: stop and disable in bulk, then record the pre-mutation snapshots in manifest
-    $serviceStartupSnapshots.Name | ForEach-Object -Parallel {
-        $svc = Get-Service -Name $_ -EA SilentlyContinue
-        if ($svc) {
-            Stop-Service -Name $_ -Force -EA SilentlyContinue
-            Set-Service -Name $_ -StartupType Disabled -EA SilentlyContinue
-        }
-    } -ThrottleLimit 8
-    # Record in manifest (must be sequential for thread-safe ArrayList)
-    foreach ($svcSnapshot in $serviceStartupSnapshots) {
-        $script:manifest.changes.services_disabled.Add(@{
-            name = $svcSnapshot.Name
-            original_startup_type = $svcSnapshot.OriginalStartupType
-        }) | Out-Null
-        $script:counters.ServicesDisabled++
-    }
-} else {
-    foreach ($svc in $servicesToDisable) {
-        Disable-ServiceDryRun -ServiceName $svc
-    }
+foreach ($svc in $servicesToDisable) {
+    # Sequential execution keeps each service result and verification tied to its snapshot.
+    Disable-ServiceDryRun -ServiceName $svc
 }
 
 # Handle per-user services (have _XXXXX suffix)
@@ -118,8 +87,9 @@ Write-Log "  Bloatware services disabled" "SUCCESS"
 # ============================================================================
 if (Test-PhaseEnabled 'Privacy') {
 Write-Log "[Cleanup] Clearing temp files..." "SECTION"
+$allowTempCleanup = Test-IrreversibleOperationAllowed -Name 'Temporary file cleanup'
 
-if (-not $DryRun) {
+if (-not $DryRun -and $allowTempCleanup) {
     # System temp
     Remove-Item "$env:TEMP\*" -Recurse -Force -EA 0
     Remove-Item "C:\Windows\Temp\*" -Recurse -Force -EA 0
@@ -139,8 +109,10 @@ if (-not $DryRun) {
 
     # Delivery Optimization cache
     Remove-Item "C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\*" -Recurse -Force -EA 0
-} else {
+} elseif ($DryRun) {
     Write-Log "  [DRY RUN] Would clear temp, prefetch, WU cache, and delivery optimization cache" "INFO"
+} else {
+    Write-Log "  Temp file cleanup skipped (explicit approval required)" "WARNING"
 }
 
 Write-Log "  Temp files cleared" "SUCCESS"

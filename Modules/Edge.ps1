@@ -109,7 +109,8 @@ if (!(Test-Path $forcelistPath)) { New-Item -Path $forcelistPath -Force | Out-Nu
 Set-Reg -Path $forcelistPath -Name "1" -Value "odfafepnkmbhccpbejgmiehpchacaeak;https://edge.microsoft.com/extensionwebstorebase/v1/crx" -Type "String"
 
 # Configure Edge bookmarks (default: Google only; use -ConfigPath to add vendor links)
-if (-not $DryRun) {
+$allowBookmarkCleanup = Test-IrreversibleOperationAllowed -Name 'Edge bookmark file update'
+if (-not $DryRun -and $allowBookmarkCleanup) {
     Write-Log "  Configuring Edge bookmarks..." "INFO"
     $edgeUserData = "$env:LOCALAPPDATA\Microsoft\Edge\User Data"
 
@@ -199,6 +200,8 @@ if (-not $DryRun) {
             }
         }
     }
+} elseif (-not $DryRun) {
+    Write-Log "  Edge bookmark file update skipped (explicit approval required)" "WARNING"
 }
 
 Write-Log "  Edge configured" "SUCCESS"

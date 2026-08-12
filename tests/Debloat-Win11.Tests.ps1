@@ -1,9 +1,10 @@
 BeforeAll {
-    $scriptPath = Join-Path $PSScriptRoot '..' 'Debloat-Win11.ps1'
+    $repoRoot = Split-Path $PSScriptRoot -Parent
+    $scriptPath = Join-Path $repoRoot 'Debloat-Win11.ps1'
     $scriptContent = Get-Content $scriptPath -Raw
 
     # Also read all dot-sourced module files so content checks cover the full codebase
-    $modulesDir = Join-Path $PSScriptRoot '..' 'Modules'
+    $modulesDir = Join-Path $repoRoot 'Modules'
     $allContent = $scriptContent
     if (Test-Path $modulesDir) {
         Get-ChildItem $modulesDir -Filter '*.ps1' | ForEach-Object {
@@ -31,6 +32,7 @@ Describe 'Script Structure' {
         $scriptContent | Should -Match '\[string\]\$ConfigPath'
         $scriptContent | Should -Match '\[string\[\]\]\$Only'
         $scriptContent | Should -Match '\[string\[\]\]\$Skip'
+        $scriptContent | Should -Match '\[switch\]\$AllowIrreversibleChanges'
     }
 
     It 'declares $Explain parameter with rationale support' {
@@ -40,7 +42,7 @@ Describe 'Script Structure' {
 
     It 'defines valid phase list' {
         $scriptContent | Should -Match "validPhases\s*=\s*@\("
-        foreach ($phase in @('AppX','OEM','OneDrive','Office','Edge','Firewall','Privacy','Services','SystemTweaks','Power','Network','StartMenu')) {
+        foreach ($phase in @('AppX','OEM','OneDrive','Office','Edge','Firewall','Privacy','Services','SystemTweaks','Power','Network','StartMenu','Updates')) {
             $scriptContent | Should -Match "'$phase'"
         }
     }
@@ -156,22 +158,19 @@ Describe 'Disable-ServiceDryRun' {
     }
 }
 
-Describe 'PowerShell 7 Service Manifest Fidelity' {
+Describe 'Service Operation Result Fidelity' {
     BeforeAll {
-        $servicesContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Services.ps1') -Raw
-        $ps7Block = [regex]::Match($servicesContent, 'if \(\$PSVersionTable\.PSVersion\.Major -ge 7 -and -not \$DryRun\) \{([\s\S]*?)\} else \{').Groups[1].Value
+        $servicesContent = Get-Content (Join-Path $repoRoot 'Modules\Services.ps1') -Raw
     }
 
-    It 'snapshots service startup types before parallel disable' {
-        $snapshotIndex = $ps7Block.IndexOf('$serviceStartupSnapshots')
-        $parallelIndex = $ps7Block.IndexOf('ForEach-Object -Parallel')
-        $snapshotIndex | Should -BeGreaterOrEqual 0
-        $parallelIndex | Should -BeGreaterThan $snapshotIndex
+    It 'routes every configured service through the verified helper' {
+        $servicesContent | Should -Match 'Disable-ServiceDryRun -ServiceName \$svc'
+        $servicesContent | Should -Not -Match 'ForEach-Object -Parallel'
     }
 
-    It 'records manifest entries from pre-mutation snapshots' {
-        $ps7Block | Should -Match 'original_startup_type\s*=\s*\$svcSnapshot\.OriginalStartupType'
-        $ps7Block | Should -Not -Match 'original_startup_type\s*=\s*\$svcObj\.StartType\.ToString\(\)'
+    It 'records an operation result for service success and failure paths' {
+        $scriptContent | Should -Match 'Register-OperationResult -Name \$ServiceName -Action ''Disable service'''
+        $scriptContent | Should -Match 'Register-OperationFailure -Name \$ServiceName -Action ''Disable service'''
     }
 }
 
@@ -358,6 +357,57 @@ Describe 'DryRun Functional Behavior' {
         $count | Should -BeGreaterThan 0
         $script:counters.RegistryTweaks | Should -Be $count
     }
+
+    It 'does not target Intel packages, folders, registry roots, or startup entries' {
+        $oemContent = Get-Content (Join-Path $repoRoot 'Modules\OEM.ps1') -Raw
+        $oemContent | Should -Not -Match "Get-Package \*Intel\*"
+        $oemContent | Should -Not -Match '\$env:ProgramFiles\\Intel'
+        $oemContent | Should -Not -Match 'SOFTWARE\\Intel'
+        $oemContent | Should -Not -Match 'oemAppxPatterns\s*=\s*@\([^)]*Intel'
+    }
+
+    It 'never removes language packs or Windows Security startup' {
+        $oemContent = Get-Content (Join-Path $repoRoot 'Modules\OEM.ps1') -Raw
+        $oemContent | Should -Not -Match 'C:\\langpacks'
+        $oemContent | Should -Not -Match 'SecurityHealth'
+    }
+}
+
+Describe 'Irreversible Change Gate' {
+    It 'defines the approval gate and records skipped operations' {
+        $scriptContent | Should -Match 'function Test-IrreversibleOperationAllowed'
+        $scriptContent | Should -Match "Status 'Skipped'"
+        $scriptContent | Should -Match '-AllowIrreversibleChanges'
+    }
+
+    It 'gates destructive dot-sourced modules' {
+        foreach ($module in @('AppX.ps1','OEM.ps1','OneDrive.ps1','Office.ps1','Firewall.ps1')) {
+            $moduleContent = Get-Content (Join-Path $repoRoot (Join-Path 'Modules' $module)) -Raw
+            $moduleContent | Should -Match 'Test-IrreversibleOperationAllowed'
+        }
+    }
+
+    It 'keeps default network behavior profile-preserving and private-only' {
+        $perfContent = Get-Content (Join-Path $repoRoot 'Modules\SystemTweaks_Perf.ps1') -Raw
+        $perfContent | Should -Not -Match 'Set-NetConnectionProfile'
+        $perfContent | Should -Match "NetworkProfile.*Preserve"
+        $perfContent | Should -Match 'Profile Domain,Private'
+        $perfContent | Should -Not -Match 'Profile Domain,Private,Public'
+    }
+
+    It 'makes compliance require a complete manifest and registry stamp' {
+        $detectionContent = Get-Content (Join-Path $repoRoot 'Detect-Debloat.ps1') -Raw
+        $detectionContent | Should -Match "Status -eq 'Complete'"
+        $detectionContent | Should -Match 'operation_summary\.failed -eq 0'
+        $detectionContent | Should -Match 'ManifestPath'
+    }
+
+    It 'records rollback limitations instead of silently claiming full recovery' {
+        $scriptContent | Should -Match 'unsupportedRollback'
+        $scriptContent | Should -Match '\$script:manifest\.rollback'
+        $scriptContent | Should -Match 'schema_version = 1'
+        $scriptContent | Should -Match 'unsupported changes'
+    }
 }
 
 Describe 'AppX Removal Counters' {
@@ -541,8 +591,8 @@ Describe 'DarkMode Config Override' {
 
 Describe 'Privacy Event Log Clearing' {
     BeforeAll {
-        $privacyContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Privacy.ps1') -Raw
-        $exampleConfigContent = Get-Content (Join-Path $PSScriptRoot '..' 'debloat.example.psd1') -Raw
+        $privacyContent = Get-Content (Join-Path $repoRoot 'Modules\Privacy.ps1') -Raw
+        $exampleConfigContent = Get-Content (Join-Path $repoRoot 'debloat.example.psd1') -Raw
     }
 
     It 'does not enumerate and clear every event log by default' {
@@ -631,7 +681,7 @@ Describe 'Registry Version Stamp' {
     }
 
     It 'detection script checks registry first' {
-        $detectContent = Get-Content (Join-Path $PSScriptRoot '..' 'Detect-Debloat.ps1') -Raw
+        $detectContent = Get-Content (Join-Path $repoRoot 'Detect-Debloat.ps1') -Raw
         $detectContent | Should -Match 'HKLM:\\SOFTWARE\\Debloat-Win11'
         $detectContent | Should -Match 'registry stamp'
     }
@@ -639,14 +689,14 @@ Describe 'Registry Version Stamp' {
 
 Describe 'Shared HKCU Tweaks' {
     It 'HkcuTweaks.psd1 exists and is valid' {
-        $tweakFile = Join-Path $PSScriptRoot '..' 'Modules' 'HkcuTweaks.psd1'
+        $tweakFile = Join-Path $repoRoot 'Modules\HkcuTweaks.psd1'
         Test-Path $tweakFile | Should -Be $true
         $tweaks = & ([scriptblock]::Create((Get-Content $tweakFile -Raw)))
         $tweaks.Count | Should -BeGreaterThan 20
     }
 
     It 'maintenance script loads shared tweaks' {
-        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
+        $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
         $maintainContent | Should -Match 'HkcuTweaks\.psd1'
     }
 
@@ -657,8 +707,8 @@ Describe 'Shared HKCU Tweaks' {
 
 Describe 'Logged-in HKCU Propagation' {
     BeforeAll {
-        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
-        $remediateContent = Get-Content (Join-Path $PSScriptRoot '..' 'Remediate-Drift.ps1') -Raw
+        $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
+        $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
     }
 
     It 'resolves loaded profile hives through Win32_UserProfile and HKEY_USERS' {
@@ -682,10 +732,10 @@ Describe 'Logged-in HKCU Propagation' {
 
 Describe 'Typed HKCU Propagation' {
     BeforeAll {
-        $hkcuContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'HkcuTweaks.psd1') -Raw
-        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
-        $remediateContent = Get-Content (Join-Path $PSScriptRoot '..' 'Remediate-Drift.ps1') -Raw
-        $systemTweaksContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'SystemTweaks_System.ps1') -Raw
+        $hkcuContent = Get-Content (Join-Path $repoRoot 'Modules\HkcuTweaks.psd1') -Raw
+        $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
+        $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
+        $systemTweaksContent = Get-Content (Join-Path $repoRoot 'Modules\SystemTweaks_System.ps1') -Raw
         $allUsersBlock = [regex]::Match($systemTweaksContent, '# ALL-USERS HKCU PROPAGATION[\s\S]*').Value
     }
 
@@ -744,7 +794,7 @@ Describe 'RemoveDefaultMicrosoftStorePackages Policy' {
 Describe 'Expanded Drift Detection' {
     It 'checks at least 30 registry values' {
         $driftBlock = [regex]::Match($scriptContent, '\$driftChecks\s*=\s*@\(([\s\S]*?)\)').Groups[1].Value
-        $policyFile = Join-Path $PSScriptRoot '..' 'Modules' 'WindowsAiPolicies.psd1'
+        $policyFile = Join-Path $repoRoot 'Modules\WindowsAiPolicies.psd1'
         $policyChecks = & ([scriptblock]::Create((Get-Content $policyFile -Raw))) | Where-Object { $_.ApplyByDefault -ne $false }
         $checkCount = ([regex]::Matches($driftBlock, '@\{')).Count + @($policyChecks).Count
         $checkCount | Should -BeGreaterOrEqual 30
@@ -769,11 +819,11 @@ Describe 'Expanded Drift Detection' {
 
 Describe 'WindowsAI Policy Map' {
     BeforeAll {
-        $windowsAiPolicyFile = Join-Path $PSScriptRoot '..' 'Modules' 'WindowsAiPolicies.psd1'
+        $windowsAiPolicyFile = Join-Path $repoRoot 'Modules\WindowsAiPolicies.psd1'
         $windowsAiPolicies = & ([scriptblock]::Create((Get-Content $windowsAiPolicyFile -Raw)))
-        $hkcuContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'HkcuTweaks.psd1') -Raw
-        $remediateContent = Get-Content (Join-Path $PSScriptRoot '..' 'Remediate-Drift.ps1') -Raw
-        $maintainContent = Get-Content (Join-Path $PSScriptRoot '..' 'Debloat-Win11-Maintain.ps1') -Raw
+        $hkcuContent = Get-Content (Join-Path $repoRoot 'Modules\HkcuTweaks.psd1') -Raw
+        $remediateContent = Get-Content (Join-Path $repoRoot 'Remediate-Drift.ps1') -Raw
+        $maintainContent = Get-Content (Join-Path $repoRoot 'Debloat-Win11-Maintain.ps1') -Raw
     }
 
     It 'keeps DisableRecallDataProviders as a user-scope policy' {
@@ -988,8 +1038,8 @@ Describe 'Maintenance Task Trigger' {
 
 Describe 'PSScriptAnalyzer Gate' {
     BeforeAll {
-        $settingsContent = Get-Content (Join-Path $PSScriptRoot '..' 'PSScriptAnalyzerSettings.psd1') -Raw
-        $gateContent = Get-Content (Join-Path $PSScriptRoot '..' 'tools' 'Invoke-StaticAnalysis.ps1') -Raw
+        $settingsContent = Get-Content (Join-Path $repoRoot 'PSScriptAnalyzerSettings.psd1') -Raw
+        $gateContent = Get-Content (Join-Path $repoRoot 'tools\Invoke-StaticAnalysis.ps1') -Raw
     }
 
     It 'enables PowerShell 5.1 compatibility rules' {
@@ -1037,7 +1087,7 @@ Describe 'Revert Script String Value Quoting' {
 
 Describe 'Service Deduplication' {
     It 'does not double-disable telemetry services in SystemTweaks_Privacy' {
-        $privacyContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'SystemTweaks_Privacy.ps1') -Raw
+        $privacyContent = Get-Content (Join-Path $repoRoot 'Modules\SystemTweaks_Privacy.ps1') -Raw
         $privacyContent | Should -Not -Match 'Disable-ServiceDryRun.*DiagTrack'
         $privacyContent | Should -Not -Match 'Disable-ServiceDryRun.*dmwappushservice'
     }
@@ -1045,14 +1095,14 @@ Describe 'Service Deduplication' {
 
 Describe 'Temp Cleanup Phase Gating' {
     It 'gates temp file cleanup behind Privacy phase check' {
-        $servicesContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Services.ps1') -Raw
+        $servicesContent = Get-Content (Join-Path $repoRoot 'Modules\Services.ps1') -Raw
         $servicesContent | Should -Match "Test-PhaseEnabled 'Privacy'"
     }
 }
 
 Describe 'Shared AI Policy Map Coverage' {
     BeforeAll {
-        $policyFile = Join-Path $PSScriptRoot '..' 'Modules' 'WindowsAiPolicies.psd1'
+        $policyFile = Join-Path $repoRoot 'Modules\WindowsAiPolicies.psd1'
         $policies = & ([scriptblock]::Create((Get-Content $policyFile -Raw)))
     }
 
@@ -1067,7 +1117,7 @@ Describe 'Shared AI Policy Map Coverage' {
     }
 
     It 'no longer hardcodes Paint or Notepad policies in drift detection' {
-        $detectContent = Get-Content (Join-Path $PSScriptRoot '..' 'Detect-Drift.ps1') -Raw
+        $detectContent = Get-Content (Join-Path $repoRoot 'Detect-Drift.ps1') -Raw
         $detectContent | Should -Not -Match 'DisableCocreator'
         $detectContent | Should -Not -Match 'DisableImageCreator'
     }
@@ -1075,7 +1125,7 @@ Describe 'Shared AI Policy Map Coverage' {
 
 Describe 'OneDrive Multi-Profile Safety' {
     It 'checks for files before deleting per-profile OneDrive folders' {
-        $oneDriveContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'OneDrive.ps1') -Raw
+        $oneDriveContent = Get-Content (Join-Path $repoRoot 'Modules\OneDrive.ps1') -Raw
         $oneDriveContent | Should -Match 'Get-ChildItem.*Recurse.*File'
         $oneDriveContent | Should -Match 'contains files'
     }
@@ -1083,7 +1133,7 @@ Describe 'OneDrive Multi-Profile Safety' {
 
 Describe 'Firewall Program Parameter' {
     It 'does not filter out Program=System from firewall rules' {
-        $firewallContent = Get-Content (Join-Path $PSScriptRoot '..' 'Modules' 'Firewall.ps1') -Raw
+        $firewallContent = Get-Content (Join-Path $repoRoot 'Modules\Firewall.ps1') -Raw
         $firewallContent | Should -Not -Match "Program -ne 'System'"
         $firewallContent | Should -Match "Program -ne 'Any'"
     }

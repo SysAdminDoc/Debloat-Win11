@@ -5,6 +5,7 @@
 
 # Taskbar & UI
 Write-Log "  Applying taskbar & UI tweaks..." "INFO"
+$allowUiCleanup = Test-IrreversibleOperationAllowed -Name 'Explorer and desktop cleanup'
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarAl" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowTaskViewButton" -Value 0
 Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarDa" -Value 0
@@ -27,7 +28,7 @@ if ($applyDarkMode) {
 }
 
 # Remove Microsoft Store pin from taskbar
-if (-not $DryRun) {
+if (-not $DryRun -and $allowUiCleanup) {
     $taskbandPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Taskband"
     Remove-ItemProperty -Path $taskbandPath -Name "Favorites" -Force -EA 0
     Remove-ItemProperty -Path $taskbandPath -Name "FavoritesResolve" -Force -EA 0
@@ -35,7 +36,7 @@ if (-not $DryRun) {
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "HubMode" -Value 1
 
 # Classic context menu
-if (-not $DryRun) {
+if (-not $DryRun -and $allowUiCleanup) {
     reg add "HKCU\SOFTWARE\CLASSES\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32" /ve /f 2>$null | Out-Null
 }
 
@@ -55,7 +56,7 @@ Set-Reg -Path "HKCU:\Control Panel\Accessibility\Keyboard Response" -Name "Flags
 Set-Reg -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name "VerboseStatus" -Value 1
 
 # Remove 3D Objects, Gallery, Home from Explorer
-if (-not $DryRun) {
+if (-not $DryRun -and $allowUiCleanup) {
     Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}" -Recurse -EA 0
     Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}" -Recurse -EA 0
     Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Desktop\NameSpace\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}" -Recurse -EA 0
@@ -69,7 +70,7 @@ Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "ShowRecent" -Value 0
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "ShowFrequent" -Value 0
 
-if (-not $DryRun) {
+if (-not $DryRun -and $allowUiCleanup) {
     $shell = New-Object -ComObject Shell.Application
     $quickAccess = $shell.Namespace("shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}")
     $foldersToUnpin = @('Desktop', 'Downloads', 'Documents', 'Pictures', 'Music', 'Videos')
@@ -86,26 +87,12 @@ Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
 Set-Reg -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "DisallowShaking" -Value 1
 
 # ============================================================================
-# START MENU CLEANUP (Unpin Bloatware Tiles)
-# ============================================================================
-Write-Log "[Start Menu] Cleaning pinned items..." "SECTION"
-if (-not $DryRun) {
-    $startLayoutPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\Cache\DefaultAccount"
-    if (Test-Path $startLayoutPath) {
-        Get-ChildItem "$startLayoutPath\*windows.data.unifiedtile*" -EA 0 | Remove-Item -Recurse -Force -EA 0
-        Get-ChildItem "$startLayoutPath\*windows.data.taskmgr*" -EA 0 | Remove-Item -Recurse -Force -EA 0
-    }
-}
-Set-Reg -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "FeatureManagementEnabled" -Value 0
-Write-Log "  Start Menu cleaned" "SUCCESS"
-
-# ============================================================================
 # FILE EXPLORER CLEANUP (Remove Clutter)
 # ============================================================================
 Write-Log "[Explorer] Removing Explorer clutter..." "SECTION"
 Set-Reg -Path "HKCU:\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}" -Name "System.IsPinnedToNameSpaceTree" -Value 0
 Set-Reg -Path "HKCU:\Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}" -Name "System.IsPinnedToNameSpaceTree" -Value 0
-if (-not $DryRun) {
+if (-not $DryRun -and $allowUiCleanup) {
     @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}",
         "HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{0DB7E03F-FC29-4DC6-9020-FF41B59E513A}"
@@ -133,7 +120,7 @@ if ([int]$osBuild -ge 22000 -and -not $script:isLTSC) {
 # DESKTOP CLEANUP
 # ============================================================================
 Write-Log "[Desktop] Cleaning desktop shortcuts..." "SECTION"
-if (-not $DryRun) {
+if (-not $DryRun -and $allowUiCleanup) {
     @(
         "$env:PUBLIC\Desktop\Microsoft Edge.lnk",
         "$env:USERPROFILE\Desktop\Microsoft Edge.lnk",
@@ -146,6 +133,8 @@ if (-not $DryRun) {
             Remove-Item $_.FullName -Force -EA 0
         }
     }
+} elseif (-not $DryRun) {
+    Write-Log "  Desktop shortcut cleanup skipped (explicit approval required)" "WARNING"
 }
 Write-Log "  Desktop cleaned" "SUCCESS"
 

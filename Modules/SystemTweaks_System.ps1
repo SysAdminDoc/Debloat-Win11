@@ -104,7 +104,8 @@ $contextMenuKeys = @(
     'HKCR\*\shell\pintohomefile',
     'HKCR\exefile\shellex\ContextMenuHandlers\Compatibility'
 )
-if (-not $DryRun) {
+$allowContextMenuCleanup = Test-IrreversibleOperationAllowed -Name 'Context menu cleanup'
+if (-not $DryRun -and $allowContextMenuCleanup) {
     foreach ($key in $contextMenuKeys) {
         reg export $key "$env:TEMP\ctx_export.reg" /y 2>$null
         if ($LASTEXITCODE -eq 0) {
@@ -151,7 +152,11 @@ if (-not $DryRun) {
         "$env:APPDATA\Microsoft\Windows\SendTo\Fax Recipient.lnk"
     ) | ForEach-Object { if (Test-Path $_) { Remove-Item $_ -Force -EA 0 } }
 } else {
-    Write-Log "  [DRY RUN] Would remove context menu bloat entries" "INFO"
+    if ($DryRun) {
+        Write-Log "  [DRY RUN] Would remove context menu bloat entries" "INFO"
+    } else {
+        Write-Log "  Context menu cleanup skipped (explicit approval required)" "WARNING"
+    }
 }
 Write-Log "  Context menu cleaned" "SUCCESS"
 
@@ -173,7 +178,8 @@ $featuresToDisable = if ($script:configOverrides.ContainsKey('FeaturesToDisable'
     'SMB1Protocol-Server'
 ) }
 
-if (-not $DryRun) {
+$allowOptionalFeatures = Test-IrreversibleOperationAllowed -Name 'Optional feature removal'
+if (-not $DryRun -and $allowOptionalFeatures) {
     foreach ($feature in $featuresToDisable) {
         $state = Get-WindowsOptionalFeature -Online -FeatureName $feature -EA 0
         if ($state -and $state.State -eq 'Enabled') {
@@ -181,8 +187,10 @@ if (-not $DryRun) {
             Disable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart -EA 0 | Out-Null
         }
     }
-} else {
+} elseif ($DryRun) {
     Write-Log "  [DRY RUN] Would disable $($featuresToDisable.Count) optional features" "INFO"
+} else {
+    Write-Log "  Optional feature removal skipped (explicit approval required)" "WARNING"
 }
 Write-Log "  Optional features configured" "SUCCESS"
 

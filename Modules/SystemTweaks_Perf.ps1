@@ -6,6 +6,7 @@
 # ============================================================================
 # PERFORMANCE TWEAKS
 # ============================================================================
+if ($script:systemTweaksCoreSelected) {
 Write-Log "  Applying performance tweaks..." "INFO"
 
 if (-not $DryRun) {
@@ -84,6 +85,7 @@ if ($script:isSSD) {
 # STARTUP APPS CLEANUP (Common Bloatware Auto-Starts)
 # ============================================================================
 Write-Log "[Startup] Cleaning startup items..." "SECTION"
+$allowStartupCleanup = Test-IrreversibleOperationAllowed -Name 'Startup item cleanup'
 
 $startupBloat = if ($script:configOverrides.ContainsKey('StartupBloat')) { $script:configOverrides.StartupBloat } else { @(
     'Spotify', 'Discord', 'Steam', 'EpicGamesLauncher', 'AdobeGCInvoker*',
@@ -92,7 +94,7 @@ $startupBloat = if ($script:configOverrides.ContainsKey('StartupBloat')) { $scri
     'Opera*', 'Brave*', 'CCleaner*', 'DropboxUpdate', 'Lync', 'CyberLink*'
 ) }
 
-if (-not $DryRun) {
+if (-not $DryRun -and $allowStartupCleanup) {
     $runKey = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
     foreach ($item in $startupBloat) {
         Get-ItemProperty $runKey -EA 0 | ForEach-Object {
@@ -128,8 +130,10 @@ if (-not $DryRun) {
     @('*Spotify*', '*Discord*', '*Steam*', '*Epic*', '*Adobe*', '*CCleaner*', '*Skype*', '*Dropbox*') | ForEach-Object {
         Get-ChildItem $startupFolder -Filter $_ -EA 0 | Remove-Item -Force -EA 0
     }
-} else {
+} elseif ($DryRun) {
     Write-Log "  [DRY RUN] Would clean startup registry keys and shortcuts" "INFO"
+} else {
+    Write-Log "  Startup cleanup skipped (explicit approval required)" "WARNING"
 }
 Write-Log "  Startup items cleaned" "SUCCESS"
 
@@ -151,10 +155,12 @@ if (-not $KeepDefender) {
 } else {
     Write-Log "[Defender] Skipped (-KeepDefender)" "SECTION"
 }
+}
 
 # ============================================================================
 # POWER SETTINGS (Hardware-Aware)
 # ============================================================================
+if (Test-SystemTweakEnabled 'Power') {
 Write-Log "[Power] Configuring power settings..." "SECTION"
 
 if (-not $DryRun) {
@@ -196,21 +202,50 @@ if (-not $DryRun) {
 
 Set-Reg -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power" -Name "HiberbootEnabled" -Value 0
 Write-Log "  Power settings configured" "SUCCESS"
+} else {
+    Write-Log "[Power] SKIPPED (phase excluded)" "INFO"
+}
 
 # ============================================================================
 # NETWORK OPTIMIZATION
 # ============================================================================
-Write-Log "[Network] Optimizing network settings..." "SECTION"
-if (-not $DryRun) {
-    Get-NetConnectionProfile -EA 0 | Set-NetConnectionProfile -NetworkCategory Private -EA 0
-    $tcpParams = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-    Get-ChildItem $tcpParams -EA 0 | ForEach-Object {
-        Set-Reg -Path $_.PSPath -Name "TcpAckFrequency" -Value 1
-        Set-Reg -Path $_.PSPath -Name "TCPNoDelay" -Value 1
-    }
-    netsh advfirewall firewall set rule group="Network Discovery" new enable=Yes 2>$null
-    netsh advfirewall firewall set rule group="File and Printer Sharing" new enable=Yes 2>$null
-} else {
-    Write-Log "  [DRY RUN] Would set Private profile, disable Nagle's, enable discovery" "INFO"
+if (Test-SystemTweakEnabled 'Network') {
+Write-Log "[Network] Applying explicitly configured network settings..." "SECTION"
+$networkProfile = if ($script:configOverrides.ContainsKey('NetworkProfile')) { [string]$script:configOverrides.NetworkProfile } else { 'Preserve' }
+$disableNagle = if ($script:configOverrides.ContainsKey('DisableNagle')) { [bool]$script:configOverrides.DisableNagle } else { $false }
+$enableNetworkDiscovery = if ($script:configOverrides.ContainsKey('EnableNetworkDiscovery')) { [bool]$script:configOverrides.EnableNetworkDiscovery } else { $false }
+$enableFilePrinterSharing = if ($script:configOverrides.ContainsKey('EnableFilePrinterSharing')) { [bool]$script:configOverrides.EnableFilePrinterSharing } else { $false }
+
+if ($networkProfile -ne 'Preserve') {
+    Write-Log "  NetworkProfile='$networkProfile' is not supported for automatic profile changes; preserving current categories" "WARNING"
 }
-Write-Log "  Network settings optimized" "SUCCESS"
+if ($disableNagle) {
+    if (-not $DryRun) {
+        $tcpParams = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+        Get-ChildItem $tcpParams -EA 0 | ForEach-Object {
+            Set-Reg -Path $_.PSPath -Name "TcpAckFrequency" -Value 1
+            Set-Reg -Path $_.PSPath -Name "TCPNoDelay" -Value 1
+        }
+    } else {
+        Write-Log "  [DRY RUN] Would disable Nagle's algorithm on active interfaces" "INFO"
+    }
+}
+if ($enableNetworkDiscovery -or $enableFilePrinterSharing) {
+    if (-not $DryRun) {
+        if ($enableNetworkDiscovery) {
+            Set-NetFirewallRule -DisplayGroup 'Network Discovery' -Profile Domain,Private -Enabled True -EA 0
+        }
+        if ($enableFilePrinterSharing) {
+            Set-NetFirewallRule -DisplayGroup 'File and Printer Sharing' -Profile Domain,Private -Enabled True -EA 0
+        }
+    } else {
+        Write-Log "  [DRY RUN] Would enable explicitly configured sharing rules on Domain/Private profiles only" "INFO"
+    }
+}
+if (-not $disableNagle -and -not $enableNetworkDiscovery -and -not $enableFilePrinterSharing) {
+    Write-Log "  No network mutations configured; preserving profiles and firewall rules" "INFO"
+}
+Write-Log "  Network settings processed" "SUCCESS"
+} else {
+    Write-Log "[Network] SKIPPED (phase excluded)" "INFO"
+}

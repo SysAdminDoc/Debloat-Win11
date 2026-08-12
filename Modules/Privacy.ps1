@@ -7,8 +7,9 @@ Write-Log "[Privacy] Running privacy cleanup..." "SECTION"
 Write-Rationale 'Privacy'
 
 $clearEventLogs = if ($script:configOverrides.ContainsKey('ClearEventLogs')) { @($script:configOverrides.ClearEventLogs) } else { @() }
+$allowPrivacyCleanup = Test-IrreversibleOperationAllowed -Name 'Privacy file and event-log cleanup'
 
-if (-not $DryRun) {
+if (-not $DryRun -and $allowPrivacyCleanup) {
     # Clear browser caches
     Write-Log "  Clearing browser caches..." "INFO"
     @(
@@ -44,12 +45,14 @@ if (-not $DryRun) {
     } else {
         Write-Log "  Event log clearing skipped (set ClearEventLogs in config to opt in)" "INFO"
     }
-} else {
+} elseif ($DryRun) {
     if ($clearEventLogs.Count -gt 0) {
         Write-Log "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, recent files, and configured event logs: $($clearEventLogs -join ', ')" "INFO"
     } else {
         Write-Log "  [DRY RUN] Would clear browser caches, diagnostics, thumbnails, and recent files; event log clearing would be skipped" "INFO"
     }
+} else {
+    Write-Log "  Privacy file and event-log cleanup skipped (explicit approval required)" "WARNING"
 }
 
 # Disable app usage tracking

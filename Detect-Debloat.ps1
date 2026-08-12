@@ -12,9 +12,14 @@ $logDir = "$env:ProgramData\Debloat-Win11\Logs"
 
 # Check registry stamp first (survives file cleanup, compatible with Intune native rules)
 $regStamp = Get-ItemProperty "HKLM:\SOFTWARE\Debloat-Win11" -EA SilentlyContinue
-if ($regStamp -and $regStamp.Version -eq $expectedVersion) {
-    Write-Output "Debloat-Win11 $expectedVersion detected (registry stamp)"
-    exit 0
+if ($regStamp -and $regStamp.Version -eq $expectedVersion -and $regStamp.Status -eq 'Complete' -and $regStamp.ManifestPath -and (Test-Path $regStamp.ManifestPath)) {
+    try {
+        $stampManifest = Get-Content $regStamp.ManifestPath -Raw | ConvertFrom-Json
+        if ($stampManifest.version -eq $expectedVersion -and $stampManifest.status -eq 'Complete') {
+            Write-Output "Debloat-Win11 $expectedVersion detected (registry stamp)"
+            exit 0
+        }
+    } catch {}
 }
 
 # Fallback: check manifest file
@@ -25,7 +30,7 @@ if (Test-Path $logDir) {
     if ($manifests.Count -gt 0) {
         try {
             $data = Get-Content $manifests[0].FullName -Raw | ConvertFrom-Json
-            if ($data.version -eq $expectedVersion -and $data.dryrun -eq $false) {
+            if ($data.version -eq $expectedVersion -and $data.dryrun -eq $false -and $data.status -eq 'Complete' -and $data.operation_summary.failed -eq 0) {
                 Write-Output "Debloat-Win11 $expectedVersion detected (manifest: $($manifests[0].Name))"
                 exit 0
             }

@@ -3,6 +3,11 @@
 # Phase 4: Complete Office removal (when not in use)
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
+if (-not (Test-IrreversibleOperationAllowed -Name 'Office removal')) {
+    Write-Log "[Office] Office and OneNote removal SKIPPED (explicit approval required)" "WARNING"
+    return
+}
+
     Write-Log "[Office] Office Nuclear Removal..." "SECTION"
     Write-Rationale 'Office'
 
@@ -31,7 +36,7 @@
         }
 
         # Nuke OneNote AppX packages (routed through Remove-AppxDryRun for manifest tracking)
-        Remove-AppxDryRun -Pattern '*OneNote*'
+        Remove-AppxDryRun -Pattern '*OneNote*' -AllowOutsideAppX
 
         # Nuke OneNote folders
         @(

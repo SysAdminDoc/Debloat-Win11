@@ -3,6 +3,11 @@
 # Phase 3: OneDrive removal (when not in use)
 # Dot-sourced by Debloat-Win11.ps1 -- runs in caller's scope
 # ============================================================================
+if (-not (Test-IrreversibleOperationAllowed -Name 'OneDrive removal')) {
+    Write-Log "[OneDrive] OneDrive removal SKIPPED (explicit approval required)" "WARNING"
+    return
+}
+
     Write-Log "[OneDrive] Removing OneDrive..." "SECTION"
     Write-Rationale 'OneDrive'
 

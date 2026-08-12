@@ -16,7 +16,7 @@
 
 A comprehensive, production-ready PowerShell script designed to debloat, optimize, and configure Windows 10/11 workstations for professional environments. Originally developed for medical imaging workstations but suitable for any business deployment.
 
-This script is **hardware-aware**, **non-destructive to user data**, and **safe for production use**. It detects system configuration (laptop vs desktop, SSD vs HDD, OneDrive/Office usage) and applies appropriate optimizations automatically.
+This script is **hardware-aware** and defaults to a guarded, auditable run. It detects system configuration (laptop vs desktop, SSD vs HDD, OneDrive/Office usage) and applies reversible policy/service tweaks automatically; package and broad deletion phases require explicit approval.
 
 ### Why This Script?
 
@@ -29,7 +29,7 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 | No audit trail | Full logging with configurable path |
 | No way to preview changes | DryRun mode scans without modifying |
 | No undo capability | JSON undo manifest records every change |
-| Risk of breaking production PCs | Extensive safety testing, preserve in-use apps |
+| Risk of breaking production PCs | DryRun preview, operation verification, explicit irreversible-change approval, and rollback warnings |
 
 ---
 
@@ -62,6 +62,10 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 - Maintenance and drift remediation now apply shared HKCU tweaks to already-loaded user profiles, including profiles active while the task runs as SYSTEM.
 - Shared HKCU propagation honors optional registry `Type` metadata instead of forcing every value to `REG_DWORD`.
 - AppX removal counters now include provisioned-only packages while avoiding duplicate manifest entries.
+- Destructive package, OEM, Office, OneDrive, firewall, file, and broad cleanup operations require `-AllowIrreversibleChanges`; `-DryRun` remains the preview path.
+- Manifests record planned, succeeded, failed, and skipped operation results and are marked incomplete when a mutation fails.
+- Network defaults preserve the current profile and do not enable discovery, file sharing, or LLMNR on Public networks.
+- Intune detection accepts only a manifest with `status=Complete`, zero failed operations, and a matching complete registry stamp.
 
 ### New in v2.3.9
 - Lockfile now detects stale PIDs from crashed runs instead of permanently blocking
@@ -215,10 +219,9 @@ This script is **hardware-aware**, **non-destructive to user data**, and **safe 
 - ✅ Fast startup disabled
 
 ### Network
-- ✅ Nagle's algorithm disabled
-- ✅ Private network profile
-- ✅ Network discovery enabled
-- ✅ Medical imaging firewall rules
+- ✅ Profile-preserving defaults
+- ✅ Nagle, discovery, and file sharing are explicit Domain/Private-only config opt-ins
+- ✅ Firewall rule replacement is explicit and excludes LLMNR by default
 
 ### Windows Update
 - ✅ Active hours (6 AM - 11 PM)
@@ -265,6 +268,12 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 # Dry run - scan and report without making changes
 .\Debloat-Win11.ps1 -DryRun
 
+# Apply package/OEM/Office/OneDrive/firewall and broad cleanup changes after reviewing DryRun
+.\Debloat-Win11.ps1 -AllowIrreversibleChanges
+
+# Opt in to the separate WinGet upgrade phase
+.\Debloat-Win11.ps1 -UpdateApps -AllowIrreversibleChanges
+
 # Skip Office and OneDrive removal
 .\Debloat-Win11.ps1 -SkipOfficeRemoval -SkipOneDriveRemoval
 
@@ -296,6 +305,8 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 .\Debloat-Win11.ps1 -ConfigPath .\presets\security.psd1
 ```
 
+`-AllowIrreversibleChanges` is intentionally not implied by normal execution. Without it, the script still records skipped operations in the JSON manifest and continues with reversible, verified changes. AppX packages, OEM/Office/OneDrive content, firewall rule replacement, Edge bookmark files, temp/cache cleanup, startup deletion, optional-feature removal, and context-menu deletion are not changed. Use `-DryRun` first and retain the generated manifest and log before approving a live run.
+
 ### Option 2: One-Liner
 ```powershell
 powershell -ExecutionPolicy Bypass -File "C:\Scripts\Debloat-Win11.ps1"
@@ -319,7 +330,7 @@ $encoded = [Convert]::ToBase64String($bytes)
 
 ## Execution Phases
 
-The script runs in 12 configurable phases (selectable via `-Only` / `-Skip`) plus pre/post operations:
+The script runs in 13 configurable phases (selectable via `-Only` / `-Skip`) plus pre/post operations. `Updates` is opt-in through `-UpdateApps` or `-Only Updates`:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

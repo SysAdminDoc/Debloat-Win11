@@ -114,7 +114,7 @@
     # )
 
     # Firewall rules (tab-delimited CSV string with header row)
-    # Default imports file/printer sharing rules
+    # Default rules are restricted to Domain/Private profiles and exclude LLMNR
     # FirewallRules = @"
     # Name	DisplayName	Direction	Action	Protocol	LocalPort	RemotePort	Program
     # Custom-Rule-1	My Custom Rule	Inbound	Allow	TCP	8080	Any	System
@@ -136,4 +136,10 @@
     #     'Application',
     #     'System'
     # )
+
+    # Network safety controls (all preserve the existing profile category by default)
+    # NetworkProfile = 'Preserve'
+    # DisableNagle = $false
+    # EnableNetworkDiscovery = $false
+    # EnableFilePrinterSharing = $false
 }
