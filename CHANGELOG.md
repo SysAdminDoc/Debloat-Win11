@@ -2,7 +2,7 @@
 
 All notable changes to Debloat-Win11 will be documented in this file.
 
-## [Unreleased]
+## [v2.3.10] - 2026-08-11
 
 ### Fixed
 - Maintenance and drift remediation now apply HKCU tweaks directly to already-loaded user hives, including profiles active while the task runs as SYSTEM.
